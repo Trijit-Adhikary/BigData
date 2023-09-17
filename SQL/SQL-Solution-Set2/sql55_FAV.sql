@@ -1,12 +1,19 @@
 -- Query
 
-select * from
-(select cl2.caller_id, cl2.caller_duration, cl2.caller_cc, cl2.callee_id, cl2.callee_duration, LEFT(p2.phone_number,3) as callee_cc from
-(select cl.caller_id, cl.caller_duration, LEFT(p.phone_number,3) as caller_cc, cl.callee_id, cl.callee_duration from 
-(select caller_id, duration as caller_duration, callee_id, duration as callee_duration from Calls ) cl
-join Person p on p.id = cl.caller_id ) cl2
-join Person p2 on p2.id = cl2.callee_id order by caller_id) final
-;
+with test as (select * from
+(select caller_id, duration,LEFT(p.phone_number,3) as caller_cc from 
+( select caller_id, duration from Calls
+union ALL
+select callee_id, duration from Calls ) a
+join Person p
+on a.caller_id = p.id
+order by a.caller_id ) b
+join Country c on cast(b.caller_cc as UNSIGNED) = cast(c.country_code as UNSIGNED))
+
+select name from (select name,country_code, avg(duration) as country_avg_duration 
+from test
+group by country_code,name
+having country_avg_duration > (select avg(duration) from test) ) final;
 
 
 
