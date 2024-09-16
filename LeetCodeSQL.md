@@ -1,20 +1,25 @@
 # 176. Second Highest Salary
 
-Table: Employee
+Table: `Employee`
 
 | Column Name | Type |
 |-------------|------|
 | id          | int  |
 | salary      | int  |
 
+<br>
+
 id is the primary key (column with unique values) for this table.
 Each row of this table contains information about the salary of an employee.
- 
+
+<br>
+<br>
 
 Write a solution to find the second highest distinct salary from the Employee table. If there is no second highest salary, return null (return None in Pandas).
 
 The result format is in the following example.
 
+<br>
 
 Example 1:
 
@@ -28,12 +33,13 @@ Employee table:
 | 3  | 300    |
 
 
-Output: 
-|---------------------|
+Output:
+
 | SecondHighestSalary |
 |---------------------|
 | 200                 |
 
+<br>
 
 Example 2:
 
@@ -56,65 +62,73 @@ Output:
 
 
 
-
+<br>
+<br>
+<br>
 
 
 
 
 # 177. Nth Highest Salary
 
-Table: Employee
-+-------------+------+
+Table: `Employee`
+
 | Column Name | Type |
-+-------------+------+
+|-------------|------|
 | id          | int  |
 | salary      | int  |
-+-------------+------+
+
+<br>
+
 id is the primary key (column with unique values) for this table.
 Each row of this table contains information about the salary of an employee.
  
+<br>
+<br>
 
 Write a solution to find the nth highest salary from the Employee table. If there is no nth highest salary, return null.
 
 The result format is in the following example.
 
  
+<br>
 
 Example 1:
 
 Input: 
 Employee table:
-+----+--------+
+
 | id | salary |
-+----+--------+
+|----|--------|
 | 1  | 100    |
 | 2  | 200    |
 | 3  | 300    |
-+----+--------+
+
 
 n = 2
 Output: 
-+------------------------+
-| getNthHighestSalary(2) |
-+------------------------+
-| 200                    |
-+------------------------+
 
+| getNthHighestSalary(2) |
+|------------------------|
+| 200                    |
+
+
+<br>
 
 Example 2:
 
 Input: 
 Employee table:
-+----+--------+
+
 | id | salary |
-+----+--------+
+|----|--------|
 | 1  | 100    |
-+----+--------+
+
 
 n = 2
 Output: 
-+------------------------+
+
 | getNthHighestSalary(2) |
-+------------------------+
+|------------------------|
 | null                   |
-+------------------------+
+
