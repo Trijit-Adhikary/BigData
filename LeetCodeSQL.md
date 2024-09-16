@@ -58,7 +58,23 @@ Output:
 | null                |
 
 
+<br>
 
+```python
+highest_salary = employee.select(max("salary")).collect()[0][0]
+second_highest_salary = employee.filter(employee.salary != highest_salary) \
+                                .select(max("salary").alias("SecondHighestSalary"))
+second_highest_salary.show()
+```
+
+<br>
+
+```sql
+select 
+    max(salary) as SecondHighestSalary
+from employee_tbl 
+    where salary <> (select max(salary) from employee_tbl);
+```
 
 
 
@@ -131,4 +147,27 @@ Output:
 | getNthHighestSalary(2) |
 |------------------------|
 | null                   |
+
+<br>
+
+```python
+from pyspark.sql import *
+
+N = 2
+salary_window = Window.orderBy(desc("salary"))
+
+salary_ranked_df = employee.withColumn(f"salary_rank", dense_rank().over(salary_window) )
+
+salary_ranked_df.filter(salary_ranked_df.salary_rank == N).select(max(salary_ranked_df.salary).alias(f"{N}_rank")).show()
+```
+
+<br>
+
+```sql
+select max(salary) as {N}_salary
+    from
+        (select salary, dense_rank() over(order by salary desc) as sal_rank
+        from employee_tbl)
+    where sal_rank = {N}
+```
 
