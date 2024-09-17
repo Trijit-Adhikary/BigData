@@ -60,6 +60,8 @@ Output:
 
 <br>
 
+## Solution -
+
 ```python
 highest_salary = employee.select(max("salary")).collect()[0][0]
 second_highest_salary = employee.filter(employee.salary != highest_salary) \
@@ -76,7 +78,7 @@ from employee_tbl
     where salary <> (select max(salary) from employee_tbl);
 ```
 
-
+---
 
 <br>
 <br>
@@ -150,6 +152,8 @@ Output:
 
 <br>
 
+## Solution -
+
 ```python
 from pyspark.sql import *
 
@@ -170,4 +174,11 @@ select max(salary) as {N}_salary
         from employee_tbl)
     where sal_rank = {N}
 ```
+
+---
+
+<br>
+<br>
+<br>
+
 
