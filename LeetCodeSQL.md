@@ -236,6 +236,23 @@ Output:
 
 <br>
 
+## Solution -
+
+```python
+from pyspark.sql import *
+
+score_window = Window.orderBy(desc("score"))
+
+ranked_scores_df = scores.withColumn("rank", dense_rank().over(score_window)).select("score","rank")
+ranked_scores_df.show()
+```
+
+```sql
+select score, 
+       dense_rank() over(order by score desc) as rank
+from scores_tbl;
+```
+
 
 <br>
 <br>
@@ -294,6 +311,58 @@ Explanation: 1 is the only number that appears consecutively for at least three 
 
 <br>
 
+## Solution -
+
+### Approach 1 -
+
+```python
+from pyspark.sql import *
+
+num_window = Window.orderBy("id")
+
+consecutive_nums = logs.withColumn("second_num", lead(logs.num,1).over(num_window)) \
+                       .withColumn("third_num", lead(logs.num,2).over(num_window))
+consecutive_nums.filter( (consecutive_nums.num == consecutive_nums.second_num) 
+                            & (consecutive_nums.num == consecutive_nums.third_num) ) \
+                .select( consecutive_nums.num.alias("ConsecutiveNums") ) \
+                .distinct() \
+                .show()
+```
+
+```sql
+select distinct num as ConsecutiveNums  from
+(select *, 
+        lead(num,1) over(order by id) as secound_num,
+        lead(num,2) over(order by id) as third_num
+from logs_tbl ) abc
+where num = secound_num and num = third_num
+```
+
+<br>
+
+### Approach 2 -
+
+```python
+logs2 = logs.withColumnRenamed("id","id2").withColumnRenamed("num","num2")
+logs3 = logs.withColumnRenamed("id","id3").withColumnRenamed("num","num3")
+
+logs.join(logs2, (logs2.id2 == (logs.id + 1)) & (logs2.num2 == logs.num), "inner" ) \
+    .join(logs3, (logs3.id3 == (logs.id + 2)) & (logs3.num3 == logs.num), "inner" ) \
+    .selectExpr("num as ConsecutiveNums") \
+    .distinct() \
+    .show()
+```
+
+```sql
+select distinct l1.num as ConsecutiveNums  
+from logs_tbl l1
+join logs_tbl l2
+    on l2.id = (l1.id + 1)
+    and l1.num = l2.num
+join logs_tbl l3
+    on l3.id = (l1.id + 2)
+    and l3.num = l1.num
+```
 
 
 <br>
