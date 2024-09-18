@@ -446,6 +446,8 @@ Output:
 
 Explanation: Max and Jim both have the highest salary in the IT department and Henry has the highest salary in the Sales department.
 
+<br>
+
 ## Solution -
 
 ### Approach 1 -
@@ -563,6 +565,8 @@ Result table:
 For the player with id 1, 5 + 6 = 11 games played by 2016-05-02, and 5 + 6 + 1 = 12 games played by 2017-06-25.
 For the player with id 3, 0 + 5 = 5 games played by 2018-07-03.
 Note that for each player we only care about the days when the player logged in.
+
+<br>
 
 ## Solution -
 
