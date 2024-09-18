@@ -400,6 +400,7 @@ id is the primary key (column with unique values) for this table. It is guarante
 Each row of this table indicates the ID of a department and its name.
 
 <br>
+<br>
 
 Write a solution to find employees who have the highest salary in each of the departments.
 
@@ -407,7 +408,8 @@ Return the result table in any order.
 
 The result format is in the following example.
 
-<br> 
+<br>
+<br>
 
 Example 1:
 
