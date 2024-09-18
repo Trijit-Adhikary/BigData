@@ -446,6 +446,68 @@ Output:
 
 Explanation: Max and Jim both have the highest salary in the IT department and Henry has the highest salary in the Sales department.
 
+## Solution -
+
+### Approach 1 -
+
+```python
+from pyspark.sql import *
+
+sal_window = Window.partitionBy("departmentId").orderBy(desc("Salary"))
+
+ranked_sal = employee.withColumn("sal_rank", rank().over(sal_window)) \
+                        .filter("sal_rank = 1")
+
+ranked_sal.join(department, ranked_sal.departmentid == department.id, 'left') \
+            .select(department.name.alias("Department"), 
+                        ranked_sal.name.alias("Employee"), 
+                        ranked_sal.salary) \
+            .show()
+```
+
+```sql
+select dept.name as Department, 
+        emp.name as Employee,
+        emp.salary as Salary
+from
+(select * 
+from
+    (select *,
+            rank() over(partition by departmentId order by salary desc) as sal_rank
+    from employee_tbl ) ranked_sal
+where sal_rank = 1 ) emp
+left join department_tbl dept
+    on emp.departmentId = dept.id
+````
+
+### Approach 2 -
+
+```python
+dept_max_sal = employee.groupBy("departmentId").agg(max("salary").alias("dept_max_sal"))
+
+sal_with_dept = employee.join(department, employee.departmentid == department.id, 'left')
+
+sal_with_dept.join(dept_max_sal, (sal_with_dept.departmentid == dept_max_sal.departmentId) & (sal_with_dept.salary == dept_max_sal.dept_max_sal),'inner') \
+            .show()
+```
+
+```sql
+with dept_max_sal as (
+    select departmentId, max(salary) as dept_max_sal
+    from employee_tbl
+    group by departmentId
+)
+select dept.name as Department, 
+        emp.name as Employee,
+        emp.salary as Salary
+from employee_tbl emp
+left join department_tbl dept
+on emp.departmentId = dept.id
+where (emp.departmentId, emp.salary) IN (select * from dept_max_sal)
+```
+
+
+
 <br>
 <br>
 <br>
@@ -499,6 +561,24 @@ Result table:
 For the player with id 1, 5 + 6 = 11 games played by 2016-05-02, and 5 + 6 + 1 = 12 games played by 2017-06-25.
 For the player with id 3, 0 + 5 = 5 games played by 2018-07-03.
 Note that for each player we only care about the days when the player logged in.
+
+```python
+from pyspark.sql import *
+
+game_play_window = Window.partitionBy("player_id").orderBy("event_date")
+activity.withColumn("games_played_so_far", sum("games_played").over(game_play_window)) \
+    .select("player_id","event_date","games_played_so_far") \
+    .show()
+```
+
+```sql
+select player_id, event_date, games_played_so_far
+from
+(select *, sum(games_played) over(partition by player_id order by event_date) as games_played_so_far
+from activity_tbl )
+
+```
+
 
 <br>
 <br>
