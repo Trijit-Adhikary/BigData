@@ -390,12 +390,12 @@ Each row of this table indicates the ID, name, and salary of an employee. It als
 
 Table: `Department`
 
-+-------------+---------+
+
 | Column Name | Type    |
-+-------------+---------+
+|-------------|---------|
 | id          | int     |
 | name        | varchar |
-+-------------+---------+
+
 id is the primary key (column with unique values) for this table. It is guaranteed that department name is not NULL.
 Each row of this table indicates the ID of a department and its name.
 
@@ -421,6 +421,8 @@ Input:
 | 3  | Henry | 80000  | 2            |
 | 4  | Sam   | 60000  | 2            |
 | 5  | Max   | 90000  | 1            |
+
+<br>
 
 `Department` table:
 
