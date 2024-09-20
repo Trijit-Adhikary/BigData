@@ -364,12 +364,12 @@ join logs_tbl l3
     and l3.num = l1.num
 ```
 
-
-<br>
-<br>
-<br>
-
 ---
+
+<br>
+<br>
+<br>
+
 
 # 184. Department Highest Salary
 
@@ -510,13 +510,13 @@ on emp.departmentId = dept.id
 where (emp.departmentId, emp.salary) IN (select * from dept_max_sal)
 ```
 
-
-
-<br>
-<br>
-<br>
-
 ---
+
+<br>
+<br>
+<br>
+
+
 
 # 534. Game Play Analysis III
 
@@ -587,12 +587,12 @@ from activity_tbl )
 
 ```
 
-
-<br>
-<br>
-<br>
-
 ---
+
+<br>
+<br>
+<br>
+
 
 # 550. Game Play Analysis IV
 
@@ -675,11 +675,12 @@ on a.player_id = fli.player_id
 and a.event_date = date_add(fli.first_login_date, 1)
 ```
 
+---
+
 <br>
 <br>
 <br>
 
----
 
 # 570. Managers with at Least 5 Direct Reports
 
@@ -707,7 +708,7 @@ Return the result table in any order.
 
 The result format is in the following example.
 
- <br>
+<br>
 
 Example 1:
 
@@ -723,14 +724,38 @@ Input:
 | 105 | Anne  | A          | 101       |
 | 106 | Ron   | B          | 101       |
 
+<br>
+
 Output: 
 
 | name |
 |------|
 | John |
 
+
+```python
+more_thn_5_reports = employee.groupBy("managerid").count().filter("count >= 5")
+employee.select("id","name") \ # To avoid ambiguity
+        .join(more_thn_5_reports, employee.id == more_thn_5_reports.managerid, 'inner') \
+        .select("name") \
+        .show()
+```
+
+```sql
+select e.name
+    from employee_tbl e
+join
+    (select managerId, count(managerId) as reports_count
+        from employee_tbl
+    group by managerId
+    having count(managerId) >= 5 ) mt5r
+on e.id = mt5r.managerId
+```
+
+---
+
 <br>
 <br>
 <br>
 
----
+
