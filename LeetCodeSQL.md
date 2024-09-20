@@ -594,3 +594,143 @@ from activity_tbl )
 
 ---
 
+# 550. Game Play Analysis IV
+
+Table: `Activity`
+
+
+| Column Name  | Type    |
+|--------------|---------
+| player_id    | int     |
+| device_id    | int     |
+| event_date   | date    |
+| games_played | int     |
+
+(player_id, event_date) is the primary key (combination of columns with unique values) of this table.
+This table shows the activity of players of some games.
+Each row is a record of a player who logged in and played a number of games (possibly 0) before logging out on someday using some device.
+ 
+<br>
+<br>
+
+Write a solution to report the fraction of players that logged in again on the day after the day they first logged in, rounded to 2 decimal places. In other words, you need to count the number of players that logged in for at least two consecutive days starting from their first login date, then divide that number by the total number of players.
+
+The result format is in the following example.
+
+
+<br>
+
+Example 1:
+
+Input: 
+Activity table:
+
+| player_id | device_id | event_date | games_played |
+|-----------|-----------|------------|--------------|
+| 1         | 2         | 2016-03-01 | 5            |
+| 1         | 2         | 2016-03-02 | 6            |
+| 2         | 3         | 2017-06-25 | 1            |
+| 3         | 1         | 2016-03-02 | 0            |
+| 3         | 4         | 2018-07-03 | 5            |
+
+
+<br>
+
+Output: 
+
+| fraction  |
+|-----------|
+| 0.33      |
+
+Explanation: 
+Only the player with id 1 logged back in after the first day he had logged in so the answer is 1/3 = 0.33
+
+<br>
+<br>
+
+```python
+first_logged_in = activity.groupBy("player_id") \
+                            .agg( min(activity.event_date).alias("first_login_date") )
+
+all_players_cnt = activity.select("player_id").distinct().count()
+
+next_day_logged_cnt = activity.join(first_logged_in, (activity.event_date == date_add(first_logged_in.first_login_date, 1) ) & 
+                                                        (activity.player_id == first_logged_in.player_id), 'inner') \
+                                .count()
+
+print(__builtin__.round((next_day_logged_cnt/all_players_cnt), 2 ) )
+
+```
+
+```sql
+WITH first_logged_in AS (
+    select player_id, min(event_date) as first_login_date
+    from activity_tbl
+    group by player_id
+)
+select round((count(*) / (select count(distinct player_id) from activity_tbl) ), 2) as fraction
+from activity_tbl a
+join first_logged_in fli
+on a.player_id = fli.player_id
+and a.event_date = date_add(fli.first_login_date, 1)
+```
+
+<br>
+<br>
+<br>
+
+---
+
+# 570. Managers with at Least 5 Direct Reports
+
+Table: `Employee`
+
+
+| Column Name | Type    |
+|-------------|---------|
+| id          | int     |
+| name        | varchar |
+| department  | varchar |
+| managerId   | int     |
+
+id is the primary key (column with unique values) for this table.
+Each row of this table indicates the name of an employee, their department, and the id of their manager.
+If managerId is null, then the employee does not have a manager.
+No employee will be the manager of themself.
+
+<br>
+<br>
+
+Write a solution to find managers with at least five direct reports.
+
+Return the result table in any order.
+
+The result format is in the following example.
+
+ <br>
+
+Example 1:
+
+Input: 
+`Employee` table:
+
+| id  | name  | department | managerId |
+|-----|-------|------------|-----------|
+| 101 | John  | A          | null      |
+| 102 | Dan   | A          | 101       |
+| 103 | James | A          | 101       |
+| 104 | Amy   | A          | 101       |
+| 105 | Anne  | A          | 101       |
+| 106 | Ron   | B          | 101       |
+
+Output: 
+
+| name |
+|------|
+| John |
+
+<br>
+<br>
+<br>
+
+---
