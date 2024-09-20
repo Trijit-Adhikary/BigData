@@ -732,6 +732,7 @@ Output:
 |------|
 | John |
 
+<br>
 
 ```python
 more_thn_5_reports = employee.groupBy("managerid").count().filter("count >= 5")
