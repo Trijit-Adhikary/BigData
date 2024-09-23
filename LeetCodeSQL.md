@@ -812,6 +812,7 @@ You may assume there is no tie, in other words there will be at most one winning
 <br>
 <br>
 
+* imp
 # 578. Get Highest Answer Rate Question
 
 The **answer rate** for a question is the number of times a user answered the question by the number of times a user showed the question.
@@ -836,11 +837,11 @@ Table: `survey_log `
 
 Output: 
 
-+-------------+
+
 | survey_log  |
-+-------------+
+|-------------|
 |    285      |
-+-------------+
+
 
 ---
 
