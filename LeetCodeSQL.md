@@ -814,7 +814,7 @@ You may assume there is no tie, in other words there will be at most one winning
 <br>
 <br>
 
-**imp**
+**Review**
 
 # 578. Get Highest Answer Rate Question
 
