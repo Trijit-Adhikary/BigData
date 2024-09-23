@@ -844,6 +844,56 @@ Output:
 |    285      |
 
 
+<br>
+<br>
+
+# Solution -
+
+## Approach 1 -
+
+```sql
+with answered_questions as (
+    select question_id, action, count(*) as ans_cnt
+    from survey_log_tbl
+    group by question_id, action
+    having action = 'answer'
+),
+showed_questions as (
+    select question_id, action, count(*) as show_cnt
+    from survey_log_tbl
+    group by question_id, action
+    having action = 'show'
+)
+select question_id as survey_log from
+(select sq.question_id, (ans_cnt / show_cnt) as answer_rate 
+    from showed_questions sq
+    join answered_questions aq
+on sq.question_id = aq.question_id
+order by answer_rate desc, sq.question_id asc)
+```
+
+## Approach 2 -
+
+```python
+survey_log.withColumn("ans", when(survey_log.action == 'answer', 1 ).otherwise(0) ) \
+        .withColumn("show", when(survey_log.action == 'show', 1).otherwise(0) ) \
+        .groupBy("question_id").agg( (sum("ans")/sum("show")).alias("answer_rate") ) \
+        .orderBy(desc("answer_rate"), "question_id") \
+        .select(col("question_id").alias("survey_log")) \
+        .limit(1) \
+        .show()
+```
+
+```sql
+select question_id as survey_log
+from
+(select question_id, sum(if(action = 'answer', 1, 0)) / sum(if(action = 'show', 1, 0)) as answer_rate
+from survey_log_tbl
+group by question_id
+order by answer_rate desc, question_id asc
+limit 1 )
+```
+
 ---
 
 <br>
@@ -912,7 +962,32 @@ The Output should be:
 | Science     | 1              |
 | Law         | 0              |
 
+<br>
 
+# Solution -
+
+```python
+department.join(student, department.dept_id == student.dept_id, 'left') \
+            .groupBy("dept_name") \
+                .agg(count(col("student_id")).alias("student_number") ) \
+            .orderBy(desc("student_number"), "dept_name") \
+            .show()
+```
+
+```sql
+select dept_name, count(student_id) as student_number
+from department_tbl d
+left join student_tbl s
+on d.dept_id = s.dept_id
+group by dept_name
+order by student_number desc, dept_name
+```
+
+---
+
+<br>
+<br>
+<br>
 
 
 
