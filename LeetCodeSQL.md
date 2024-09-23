@@ -734,6 +734,8 @@ Output:
 
 <br>
 
+## Solution -
+
 ```python
 more_thn_5_reports = employee.groupBy("managerid").count().filter("count >= 5")
 employee.select("id","name") \ # To avoid ambiguity
@@ -847,9 +849,9 @@ Output:
 <br>
 <br>
 
-# Solution -
+## Solution -
 
-## Approach 1 -
+### Approach 1 -
 
 ```sql
 with answered_questions as (
@@ -872,7 +874,7 @@ on sq.question_id = aq.question_id
 order by answer_rate desc, sq.question_id asc)
 ```
 
-## Approach 2 -
+### Approach 2 -
 
 ```python
 survey_log.withColumn("ans", when(survey_log.action == 'answer', 1 ).otherwise(0) ) \
@@ -964,7 +966,7 @@ The Output should be:
 
 <br>
 
-# Solution -
+## Solution -
 
 ```python
 department.join(student, department.dept_id == student.dept_id, 'left') \
