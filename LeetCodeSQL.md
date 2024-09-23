@@ -760,3 +760,169 @@ on e.id = mt5r.managerId
 <br>
 
 
+# 574. Winning Candidate -> Simple
+
+Table: `Candidate`
+
+
+| id  | Name    |
+|-----|---------|
+| 1   | A       |
+| 2   | B       |
+| 3   | C       |
+| 4   | D       |
+| 5   | E       |
+
+<br>
+
+Table: `Vote`
+
+
+| id  | CandidateId  |
+|-----|--------------|
+| 1   |     2        |
+| 2   |     4        |
+| 3   |     3        |
+| 4   |     2        |
+| 5   |     5        |
+
+id is the auto-increment primary key,
+CandidateId is the id appeared in Candidate table.
+
+<br>
+<br>
+
+Write a  sql to find the name of the winning candidate, the above example will return the winner B.
+
+<br>
+
+
+| Name |
+|------|
+| B    |
+
+<br>
+
+**Notes:**
+You may assume there is no tie, in other words there will be at most one winning candidate.
+
+---
+
+<br>
+<br>
+<br>
+
+# 578. Get Highest Answer Rate Question
+
+The **answer rate** for a question is the number of times a user answered the question by the number of times a user showed the question.
+
+Write a sql query to report the question which has the highest **answer rate**. If multiple questions have the same maximum **answer rate**, report the question with the smallest `question_id`.
+
+<br>
+<br>
+
+Table: `survey_log `
+
+
+| uid  | action    | question_id  | answer_id  | q_num     | timestamp  |
+|------|-----------|--------------|------------|-----------|------------|
+| 5    | show      | 285          | null       | 1         | 123        |
+| 5    | answer    | 285          | 124124     | 1         | 124        |
+| 5    | show      | 369          | null       | 2         | 125        |
+| 5    | skip      | 369          | null       | 2         | 126        |
+
+
+<br>
+
+Output: 
+
++-------------+
+| survey_log  |
++-------------+
+|    285      |
++-------------+
+
+---
+
+<br>
+<br>
+<br>
+
+
+# 580. Count Student Number in Departments
+
+A university uses 2 data tables, student and department, to store data about its students and the departments associated with each major.
+
+Write a query to print the respective department name and number of students majoring in each department for all departments in the department table (even ones with no current students).
+
+Sort your results by descending number of students; if two or more departments have the same number of students, then sort those departments alphabetically by department name.
+
+The `student` is described as follow:
+
+| Column Name  | Type      |
+|--------------|-----------|
+| student_id   | Integer   |
+| student_name | String    |
+| gender       | Character |
+| dept_id      | Integer   |
+
+
+where student_id is the student's ID number, student_name is the student's name, gender is their gender, and dept_id is the department ID associated with their declared major.
+
+<br>
+
+And the `department` table is described as below:
+
+| Column Name | Type    |
+|-------------|---------|
+| dept_id     | Integer |
+| dept_name   | String  |
+
+where dept_id is the department's ID number and dept_name is the department name.
+
+Here is an example input:
+
+<br>
+
+`student` table:
+
+| student_id | student_name | gender | dept_id |
+|------------|--------------|--------|---------|
+| 1          | Jack         | M      | 1       |
+| 2          | Jane         | F      | 1       |
+| 3          | Mark         | M      | 2       |
+
+`department` table:
+
+| dept_id | dept_name   |
+|---------|-------------|
+| 1       | Engineering |
+| 2       | Science     |
+| 3       | Law         |
+
+<br>
+
+The Output should be:
+
+| dept_name   | student_number |
+|-------------|----------------|
+| Engineering | 2              |
+| Science     | 1              |
+| Law         | 0              |
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
