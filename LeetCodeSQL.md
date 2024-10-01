@@ -1149,9 +1149,9 @@ The given structure is always a valid tree.
 
 Each node in the tree can be one of three types:
 
-"Leaf": if the node is a leaf node. <br>
-"Root": if the node is the root of the tree. <br>
-"Inner": If the node is neither a leaf node nor a root node. 
+**"Leaf":** if the node is a leaf node. <br>
+**"Root":** if the node is the root of the tree. <br>
+**"Inner":** If the node is neither a leaf node nor a root node. 
 
 <br>
 <br>
