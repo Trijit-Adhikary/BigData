@@ -1055,6 +1055,37 @@ The tiv_2015 value 10 is the same as the third and fourth records, and its locat
 The second record does not meet any of the two criteria. Its tiv_2015 is not like any other policyholders and its location is the same as the third record, which makes the third record fail, too.
 So, the result is the sum of tiv_2016 of the first and last record, which is 45.
 
+<br>
+
+## Solution -
+
+```python
+unique_location = insurance.groupBy(insurance.lat, insurance.lon).agg( count(insurance.lat).alias("location_cnt")).filter(col("location_cnt") == 1)
+unique_location.show()
+
+insurance_columns = insurance.columns
+insurance1 = insurance.selectExpr([f"{clm} as {clm}_1" for clm in insurance_columns])
+insurance2 = insurance.selectExpr([f"{clm} as {clm}_2" for clm in insurance_columns])
+
+insurance1.join(insurance2, (col("pid_1") != col("pid_2")) & (col("tiv_2015_1") == col("tiv_2015_2") ), 'inner') \
+.join(unique_location, (col("lat_1") == col("lat")) & (col("lon_1") == col("lon") ),'inner') \
+.select("pid_1","tiv_2015_1","tiv_2016_1","lat_1","lon_1").distinct() \
+.select(round(sum(col("tiv_2016_1")),2).alias("tiv_2016")).show()
+```
+
+```sql
+with unique_location as (
+    select lat,lon from insurance_tbl group by lat,lon having count(*) = 1
+)
+select round(sum(tiv_2016), 2) as tiv_2016 
+from
+(select distinct in1.pid, in1.tiv_2015, in1.tiv_2016, in1.lat, in1.lon
+from insurance_tbl in1
+join insurance_tbl in2
+on in1.pid <> in2.pid
+and in1.tiv_2015 = in2.tiv_2015
+and (in1.lat, in1.lon) in (select * from unique_location) );
+```
 
 
 ---
@@ -1120,6 +1151,33 @@ The person with id 3 is a friend of people 1, 2, and 4, so he has three friends 
 
 **Follow up:** In the real world, multiple people could have the same most number of friends. Could you find all these people in this case?
 
+<br>
+
+## Solution -
+
+```python
+requestaccepted.select("requester_id") \
+    .union(requestaccepted.select("accepter_id")) \
+    .groupBy("requester_id") \
+    .agg( count(col("requester_id")).alias("num") ) \
+    .orderBy( desc(col("num")) ) \
+    .limit(1) \
+    .selectExpr("requester_id as id ", "num") \
+    .show()
+```
+
+```sql
+with complete_seq as
+(select requester_id
+from requestaccepted_tbl
+union all
+select accepter_id
+from requestaccepted_tbl )
+select requester_id as id, count(*) as num from complete_seq
+group by requester_id
+order by num desc
+limit 1;
+```
 
 
 ---
@@ -1217,7 +1275,52 @@ Output:
 
 Explanation: If there is only one node on the tree, you only need to output its root attributes.
 
+<br>
 
+## Solution -
+
+```python
+parents_collect = tree.select("p_id").where("p_id is not null").distinct().collect()
+if len(parents_collect) > 0:
+    parents = tuple([parent[0] for parent in parents_collect])
+else:
+    parents = tuple()
+
+root_node = tree.filter("p_id is null").select("id").withColumn("type",lit("Root"))
+if len(parents_collect) > 0:
+    inner_nodes = tree.filter(f"id in {parents} and  p_id is not null").select("id").withColumn("type",lit("Inner"))
+    leaf_nodes = tree.filter(f"id not in {parents}").select("id").withColumn("type",lit("Leaf"))
+
+    root_node.union(inner_nodes).union(leaf_nodes).show()
+else:
+    root_node.show()
+```
+
+```sql
+with parents as(
+    select distinct p_id
+        from tree_tbl
+    where p_id is not NULL
+),
+inner_nodes as (
+    select distinct id, 'Inner' as type
+        from tree_tbl
+    where id in (select * from parents) and p_id is not null
+),
+leaf_nodes as (
+    select distinct id, 'Leaf' as type
+        from tree_tbl
+    where id not in (select * from parents) and p_id is not null
+)
+
+select id, 'Root' as type
+from tree_tbl where p_id is null
+union
+select * from inner_nodes
+union
+select * from leaf_nodes
+order by id;
+```
 
 ---
 
