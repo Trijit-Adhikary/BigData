@@ -991,6 +991,240 @@ order by student_number desc, dept_name
 <br>
 <br>
 
+# 585. Investments in 2016
+
+Table: `Insurance`
+
+
+| Column Name | Type  |
+|-------------|-------|
+| pid         | int   |
+| tiv_2015    | float |
+| tiv_2016    | float |
+| lat         | float |
+| lon         | float |
+
+pid is the primary key (column with unique values) for this table.
+Each row of this table contains information about one policy where:
+pid is the policyholder's policy ID.
+tiv_2015 is the total investment value in 2015 and tiv_2016 is the total investment value in 2016.
+lat is the latitude of the policy holder's city. It's guaranteed that lat is not NULL.
+lon is the longitude of the policy holder's city. It's guaranteed that lon is not NULL.
+ 
+<br>
+<br>
+
+Write a solution to report the sum of all total investment values in 2016 `tiv_2016`, for all policyholders who:
+
+have the same tiv_2015 value as one or more other policyholders, and
+are not located in the same city as any other policyholder (i.e., the (`lat`, `lon`) attribute pairs must be unique).
+Round `tiv_2016` to **two decimal places**.
+
+The result format is in the following example.
+
+<br>
+
+Example 1:
+
+Input: 
+Insurance table:
+
+| pid | tiv_2015 | tiv_2016 | lat | lon |
+|-----|----------|----------|-----|-----|
+| 1   | 10       | 5        | 10  | 10  |
+| 2   | 20       | 20       | 20  | 20  |
+| 3   | 10       | 30       | 20  | 20  |
+| 4   | 10       | 40       | 40  | 40  |
+
+
+<br>
+
+Output: 
+
+| tiv_2016 |
+|----------|
+| 45.00    |
+
+
+<br>
+
+Explanation: 
+The first record in the table, like the last record, meets both of the two criteria.
+The tiv_2015 value 10 is the same as the third and fourth records, and its location is unique.
+
+The second record does not meet any of the two criteria. Its tiv_2015 is not like any other policyholders and its location is the same as the third record, which makes the third record fail, too.
+So, the result is the sum of tiv_2016 of the first and last record, which is 45.
+
+
+
+---
+
+<br>
+<br>
+<br>
+
+
+# 602. Friend Requests II: Who Has the Most Friends
+
+Table: `RequestAccepted`
+
+
+| Column Name    | Type    |
+|----------------|---------|
+| requester_id   | int     |
+| accepter_id    | int     |
+| accept_date    | date    |
+
+(requester_id, accepter_id) is the primary key (combination of columns with unique values) for this table.
+This table contains the ID of the user who sent the request, the ID of the user who received the request, and the date when the request was accepted.
+ 
+<br>
+<br>
+
+Write a solution to find the people who have the most friends and the most friends number.
+
+The test cases are generated so that only one person has the most friends.
+
+The result format is in the following example.
+
+ <br>
+
+Example 1:
+
+Input: 
+RequestAccepted table:
+
+| requester_id | accepter_id | accept_date |
+|--------------|-------------|-------------|
+| 1            | 2           | 2016/06/03  |
+| 1            | 3           | 2016/06/08  |
+| 2            | 3           | 2016/06/08  |
+| 3            | 4           | 2016/06/09  |
+
+
+<br>
+
+Output: 
+
+| id | num |
+|----|-----|
+| 3  | 3   |
+
+
+<br>
+
+Explanation: 
+The person with id 3 is a friend of people 1, 2, and 4, so he has three friends in total, which is the most number than any others.
+
+<br>
+
+**Follow up:** In the real world, multiple people could have the same most number of friends. Could you find all these people in this case?
+
+
+
+---
+
+
+<br>
+<br>
+<br>
+
+
+# 608. Tree Node
+
+Table: `Tree`
+
+
+| Column Name | Type |
+|-------------|------|
+| id          | int  |
+| p_id        | int  |
+
+id is the column with unique values for this table.
+Each row of this table contains information about the id of a node and the id of its parent node in a tree.
+The given structure is always a valid tree.
+
+ <br>
+ <br>
+
+Each node in the tree can be one of three types:
+
+"Leaf": if the node is a leaf node.
+"Root": if the node is the root of the tree.
+"Inner": If the node is neither a leaf node nor a root node.
+Write a solution to report the type of each node in the tree.
+
+Return the result table in any order.
+
+<br>
+
+The result format is in the following example.
+
+<br>
+
+Example 1:
+
+Input: 
+Tree table:
++----+------+
+| id | p_id |
++----+------+
+| 1  | null |
+| 2  | 1    |
+| 3  | 1    |
+| 4  | 2    |
+| 5  | 2    |
++----+------+
+
+<br>
+
+Output: 
++----+-------+
+| id | type  |
++----+-------+
+| 1  | Root  |
+| 2  | Inner |
+| 3  | Leaf  |
+| 4  | Leaf  |
+| 5  | Leaf  |
++----+-------+
+Explanation: 
+Node 1 is the root node because its parent node is null and it has child nodes 2 and 3.
+Node 2 is an inner node because it has parent node 1 and child node 4 and 5.
+Nodes 3, 4, and 5 are leaf nodes because they have parent nodes and they do not have child nodes.
+Example 2:
+
+<br>
+<br>
+
+Input: 
+`Tree` table:
++----+------+
+| id | p_id |
++----+------+
+| 1  | null |
++----+------+
+
+Output: 
++----+-------+
+| id | type  |
++----+-------+
+| 1  | Root  |
++----+-------+
+Explanation: If there is only one node on the tree, you only need to output its root attributes.
+
+
+
+---
+
+<br>
+<br>
+<br>
+
+
+
+
+
 
 
 
