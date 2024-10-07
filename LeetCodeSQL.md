@@ -1329,17 +1329,154 @@ order by id;
 <br>
 
 
+# 614. Second Degree Follower
+
+In facebook, there is a `follow` table with two columns: **followee**, **follower**.
+
+A **second-degree follower** is a user who:
+* follows at least one user, and
+* is followed by at least one user
+
+Wrtie a solution to report the second-degree users and the number of their followers.
+
+Return the result table **ordered** by `follower` in **alphabetical order.**
+
+<br>
+
+**For example:**
+
+| followee    | follower   |
+|-------------|------------|
+|     A       |     B      |
+|     B       |     C      |
+|     B       |     D      |
+|     D       |     E      |
+
+<br>
+
+**Output:**
+
+| follower    | num        |
+|-------------|------------|
+|     B       |  2         |
+|     D       |  1         |
+
+<br>
+<br>
+
+## Solution -
+
+```python
+distinct_follower = follow.select("follower").distinct().withColumnRenamed("follower","dist_follower")
+
+follower_count = follow.groupBy("followee") \
+                    .count() \
+                    .join(distinct_follower, distinct_follower.dist_follower == col("followee"), 'inner') \
+                    .selectExpr("followee as follower","count as num")
+follower_count.orderBy(col("follower")).show()
+```
+
+```sql
+select followee as follower, count(*) as num
+    from follow_tbl
+group by followee
+    having followee IN (select distinct follower from follow_tbl)
+```
+
+---
 
 
+# 1045. Customers Who Bought All Products
+
+| Column Name | Type    |
+|-------------|---------|
+| customer_id | int     |
+| product_key | int     |
+
+This table may contain duplicates rows. 
+customer_id is not NULL.
+product_key is a foreign key (reference column) to Product table.
+ 
+<br>
+
+Table: Product
 
 
+| Column Name | Type    |
+|-------------|---------|
+| product_key | int     |
+
+product_key is the primary key (column with unique values) for this table.
+ 
+<br>
+<br>
 
 
+Write a solution to report the customer ids from the Customer table that bought all the products in the Product table.
+
+Return the result table in any order.
+
+The result format is in the following example.
+
+ <br>
+
+Example 1:
+
+Input: 
+`Customer` table:
++-------------+-------------+
+| customer_id | product_key |
++-------------+-------------+
+| 1           | 5           |
+| 2           | 6           |
+| 3           | 5           |
+| 3           | 6           |
+| 1           | 6           |
++-------------+-------------+
+
+<br>
+
+`Product` table:
+
+| product_key |
+|-------------|
+| 5           |
+| 6           |
 
 
+<br>
+<br>
 
+Output: 
 
+| customer_id |
+|-------------|
+| 1           |
+| 3           |
 
+Explanation: 
+The customers who bought all the products (5 and 6) are customers with IDs 1 and 3.
+
+## Solution -
+
+```python
+dist_prod_exists = product.select(countDistinct("product_key")).collect()[0][0]
+
+customer.groupBy("customer_id") \
+        .agg( countDistinct("product_key").alias("dist_prod_cnt") ) \
+        .filter(col("dist_prod_cnt") == dist_prod_exists) \
+        .select("customer_id") \
+        .show()
+```
+
+```sql
+select customer_id
+FROM customer_tbl
+GROUP BY customer_id
+having count(distinct product_key) = (select count(distinct product_key) from product_tbl)
+```
+
+---
 
 
 
