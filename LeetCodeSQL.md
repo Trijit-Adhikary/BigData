@@ -1389,7 +1389,13 @@ Note that if the number of students is odd, there is no need to change the last 
 ## Solution -
 
 ```python
-
+max_id = seat.select(max("id").alias("max_id")).collect()[0][0]
+seat.withColumn("swaped_id", when( (seat.id == max_id) & (seat.id % 2 != 0), seat.id ) \
+                               .when(seat.id % 2 != 0, (seat.id+1) ) \
+                               .when(seat.id % 2 == 0, (seat.id-1) ) ) \
+    .select(col("swaped_id").alias("id"), col("student") ) \
+    .orderBy(col("id")) \
+    .show()
 ```
 
 ```sql
