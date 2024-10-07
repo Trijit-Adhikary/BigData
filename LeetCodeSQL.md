@@ -1385,6 +1385,9 @@ group by followee
 
 ---
 
+<br>
+<br>
+<br>
 
 # 1045. Customers Who Bought All Products
 
@@ -1418,21 +1421,21 @@ Return the result table in any order.
 
 The result format is in the following example.
 
- <br>
+<br>
 
 Example 1:
 
 Input: 
 `Customer` table:
-+-------------+-------------+
+
 | customer_id | product_key |
-+-------------+-------------+
+|-------------|-------------|
 | 1           | 5           |
 | 2           | 6           |
 | 3           | 5           |
 | 3           | 6           |
 | 1           | 6           |
-+-------------+-------------+
+
 
 <br>
 
