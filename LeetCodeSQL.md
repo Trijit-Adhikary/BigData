@@ -346,8 +346,8 @@ where num = secound_num and num = third_num
 logs2 = logs.withColumnRenamed("id","id2").withColumnRenamed("num","num2")
 logs3 = logs.withColumnRenamed("id","id3").withColumnRenamed("num","num3")
 
-logs.join(logs2, (logs2.id2 == (logs.id + 1)) & (logs2.num2 == logs.num), "inner" ) \
-    .join(logs3, (logs3.id3 == (logs.id + 2)) & (logs3.num3 == logs.num), "inner" ) \
+logs.join(logs2, (logs2.id2 == (logs.id | 1)) & (logs2.num2 == logs.num), "inner" ) \
+    .join(logs3, (logs3.id3 == (logs.id | 2)) & (logs3.num3 == logs.num), "inner" ) \
     .selectExpr("num as ConsecutiveNums") \
     .distinct() \
     .show()
@@ -357,10 +357,10 @@ logs.join(logs2, (logs2.id2 == (logs.id + 1)) & (logs2.num2 == logs.num), "inner
 select distinct l1.num as ConsecutiveNums  
 from logs_tbl l1
 join logs_tbl l2
-    on l2.id = (l1.id + 1)
+    on l2.id = (l1.id | 1)
     and l1.num = l2.num
 join logs_tbl l3
-    on l3.id = (l1.id + 2)
+    on l3.id = (l1.id | 2)
     and l3.num = l1.num
 ```
 
@@ -562,8 +562,8 @@ Result table:
 | 3         | 2016-03-02 | 0                   |
 | 3         | 2018-07-03 | 5                   |
 
-For the player with id 1, 5 + 6 = 11 games played by 2016-05-02, and 5 + 6 + 1 = 12 games played by 2017-06-25.
-For the player with id 3, 0 + 5 = 5 games played by 2018-07-03.
+For the player with id 1, 5 | 6 = 11 games played by 2016-05-02, and 5 | 6 | 1 = 12 games played by 2017-06-25.
+For the player with id 3, 0 | 5 = 5 games played by 2018-07-03.
 Note that for each player we only care about the days when the player logged in.
 
 <br>
@@ -1391,7 +1391,7 @@ Note that if the number of students is odd, there is no need to change the last 
 ```python
 max_id = seat.select(max("id").alias("max_id")).collect()[0][0]
 seat.withColumn("swaped_id", when( (seat.id == max_id) & (seat.id % 2 != 0), seat.id ) \
-                               .when(seat.id % 2 != 0, (seat.id+1) ) \
+                               .when(seat.id % 2 != 0, (seat.id|1) ) \
                                .when(seat.id % 2 == 0, (seat.id-1) ) ) \
     .select(col("swaped_id").alias("id"), col("student") ) \
     .orderBy(col("id")) \
@@ -1402,7 +1402,7 @@ seat.withColumn("swaped_id", when( (seat.id == max_id) & (seat.id % 2 != 0), sea
 select
     CASE
         WHEN id = (select max(id) from seat_tbl) and id % 2 <> 0 THEN id
-        WHEN (id % 2) <> 0 THEN (id + 1)
+        WHEN (id % 2) <> 0 THEN (id | 1)
         WHEN (id % 2) = 0 THEN (id - 1)
     END as id,
     student
@@ -1570,7 +1570,104 @@ having count(distinct product_key) = (select count(distinct product_key) from pr
 
 ---
 
+1070. Product Sales Analysis III
 
+Table: `Sales`
+
+
+| Column Name | Type  |
+|-------------|-------|
+| sale_id     | int   |
+| product_id  | int   |
+| year        | int   |
+| quantity    | int   |
+| price       | int   |
+
+(sale_id, year) is the primary key (combination of columns with unique values) of this table.
+product_id is a foreign key (reference column) to Product table.
+Each row of this table shows a sale on the product product_id in a certain year.
+Note that the price is per unit.
+ 
+<br>
+
+Table: `Product`
+
+
+| Column Name  | Type    |
+|--------------|---------|
+| product_id   | int     |
+| product_name | varchar |
+
+product_id is the primary key (column with unique values) of this table.
+Each row of this table indicates the product name of each product.
+
+<br>
+<br>
+
+Write a solution to select the product id, year, quantity, and price for the first year of every product sold.
+
+Return the resulting table in any order.
+
+The result format is in the following example.
+
+<br>
+
+Example 1:
+
+Input: 
+`Sales` table:
+
+| sale_id | product_id | year | quantity | price |
+|---------|------------|------|----------|-------|
+| 1       | 100        | 2008 | 10       | 5000  |
+| 2       | 100        | 2009 | 12       | 5000  |
+| 7       | 200        | 2011 | 15       | 9000  |
+
+<br>
+
+`Product` table:
+
+| product_id | product_name |
+|------------|--------------|
+| 100        | Nokia        |
+| 200        | Apple        |
+| 300        | Samsung      |
+
+<br>
+<br>
+
+Output: 
+
+| product_id | first_year | quantity | price |
+|------------|------------|----------|-------| 
+| 100        | 2008       | 10       | 5000  |
+| 200        | 2011       | 15       | 9000  |
+
+<br>
+<br>
+
+## Solution -
+
+```python
+first_sale = sales.groupBy("product_id").agg(min("year").alias("year"))
+first_sale_renamed = first_sale.withColumnRenamed("product_id","fproduct_id").withColumnRenamed("year","fyear")
+
+sales.join(first_sale_renamed, (sales.product_id == first_sale_renamed.fproduct_id) & (sales.year == first_sale_renamed.fyear), 'inner') \
+    .selectExpr("product_id", "year as first_year", "quantity", "price") \
+    .show()
+```
+
+```sql
+select product_id, year as first_year, quantity, price
+from sales_tbl
+where (product_id, year) IN
+-- First Sale
+(select product_id, min(year) as year
+from sales_tbl
+group by product_id)
+```
+
+---
 
 
 
