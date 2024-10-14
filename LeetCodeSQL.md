@@ -1570,7 +1570,11 @@ having count(distinct product_key) = (select count(distinct product_key) from pr
 
 ---
 
-1070. Product Sales Analysis III
+<br>
+<br>
+<br>
+
+# 1070. Product Sales Analysis III
 
 Table: `Sales`
 
@@ -1584,7 +1588,7 @@ Table: `Sales`
 | price       | int   |
 
 (sale_id, year) is the primary key (combination of columns with unique values) of this table.
-product_id is a foreign key (reference column) to Product table.
+product_id is a foreign key (reference column) to `Product` table.
 Each row of this table shows a sale on the product product_id in a certain year.
 Note that the price is per unit.
  
@@ -1604,9 +1608,9 @@ Each row of this table indicates the product name of each product.
 <br>
 <br>
 
-Write a solution to select the product id, year, quantity, and price for the first year of every product sold.
+Write a solution to select the **product id, year, quantity,** and **price** for the first year of every product sold.
 
-Return the resulting table in any order.
+Return the resulting table in **any order**.
 
 The result format is in the following example.
 
