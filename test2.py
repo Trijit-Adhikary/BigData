@@ -1,4 +1,9 @@
+from azure.search.documents.aio import SearchClient
+from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.models import VectorizedQuery
+from openai import AzureOpenAI, AsyncAzureOpenAI
+import aioconsole
+import asyncio
 
 async def query_vectorizer(query: str, azure_model_client, embd_model: str):
     response = await azure_model_client.embeddings.create(
@@ -16,23 +21,21 @@ async def vector_search(query: str, azure_model_client, azure_search_client, emb
         fields="text_vector"
     )
 
-    results = await azure_search_client.search(
-        search_text=query,
-        vector_queries=[vector_query],
-        query_type="semantic",
-        semantic_configuration_name="rag-hellopdf-semantic-configuration",
-        top=5,
-        select=["chunk"]
-    )
+    async with azure_search_client:
+        results = await azure_search_client.search(
+            search_text=query,
+            vector_queries=[vector_query],
+            query_type="semantic",
+            semantic_configuration_name="rag-hellopdf-semantic-configuration",
+            top=5,
+            select=["chunk"]
+        )
 
     return results
 
-import asyncio
 
 async def chat(azure_model_client, azure_search_client, embd_mode):
-    # For async input, you might want to use a different approach
-    # Since input() is blocking, consider using aiofiles or similar
-    user_query = input("> ")  # Keep as is for now, or implement async input
+    user_query = await aioconsole.ainput("> ")
 
     current_context = ""
     messages = []
@@ -68,13 +71,22 @@ async def chat(azure_model_client, azure_search_client, embd_mode):
 # To run the async chat function
 async def main():
     # Initialize your clients here
+    azure_model_client = AsyncAzureOpenAI(
+        api_key="AZURE_API_KEY",
+        api_version="2025-01-01-preview",
+        azure_endpoint="AZURE_END_POINT"
+    )
+
+    azure_search_client = SearchClient(
+        endpoint="AZURE_SEARCH_ENDPOINT",
+        index_name="INDEX_NAME",
+        credential=AzureKeyCredential("AZURE_SEARCH_ADMIN_KEY")
+    )
+
+    embd_mode = "text-embedding-ada-002"
+
     await chat(azure_model_client, azure_search_client, embd_mode)
 
 # Run the async function
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-import aioconsole
-user_query = await aioconsole.ainput("> ")
