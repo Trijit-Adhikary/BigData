@@ -1,43 +1,33 @@
-async def generate_chat_response(user_query: str, max_tokens: int, temperature: float):
-    """Generate chat response using Azure OpenAI"""
+@app.on_event("startup")
+async def startup_event():
+    """Initialize Azure clients on startup"""
+    global azure_model_client, azure_search_client
+    
     try:
-        # Get relevant chunks from vector search
-        chunks = await vector_search(user_query, azure_model_client, azure_search_client, embd_model)
-        
-        # Convert search results to context string
-        context_chunks = []
-        chunk_count = 0
-        async for chunk in chunks:
-            context_chunks.append(chunk.get("chunk", ""))
-            chunk_count += 1
-        
-        current_context = "\n".join(context_chunks)
-
-        sys_prompt = f"""
-        You are a helpful AI assistant who understands the user query carefully and then answers the question based on the current context.
-
-        current context:
-        {current_context}
-
-        Keep your answers short and precise
-        Ask follow up questions to the user to help the user dig deeper
-        """
-
-        messages = [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": user_query}
-        ]
-
-        # Generate the completion asynchronously
-        completion = await azure_model_client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=0.95
+        # Initialize Azure OpenAI client
+        azure_model_client = AsyncAzureOpenAI(
+            api_key=os.getenv("AZURE_API_KEY", "AZURE_API_KEY"),
+            api_version="2025-01-01-preview",
+            azure_endpoint=os.getenv("AZURE_ENDPOINT", "AZURE_END_POINT")
         )
 
-        return completion.choices[0].message.content, chunk_count
-
+        # Initialize Azure Search client
+        azure_search_client = SearchClient(
+            endpoint=os.getenv("AZURE_SEARCH_ENDPOINT", "AZURE_SEARCH_ENDPOINT"),
+            index_name=os.getenv("INDEX_NAME", "INDEX_NAME"),
+            credential=AzureKeyCredential(os.getenv("AZURE_SEARCH_ADMIN_KEY", "AZURE_SEARCH_ADMIN_KEY"))
+        )
+        
+        print("✅ Azure clients initialized successfully")
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating response: {str(e)}")
+        print(f"❌ Error initializing clients: {e}")
+        raise
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    global azure_search_client
+    if azure_search_client:
+        await azure_search_client.close()
+    print("🔄 Application shutdown complete")
