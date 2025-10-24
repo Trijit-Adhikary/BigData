@@ -1,33 +1,28 @@
-@app.on_event("startup")
-async def startup_event():
-    """Initialize Azure clients on startup"""
-    global azure_model_client, azure_search_client
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest):
+    """
+    Main chat endpoint for vector search-powered conversations
+    
+    - **query**: User's question or message
+    - **max_tokens**: Maximum tokens in response (default: 500)
+    - **temperature**: Response creativity (0.0-1.0, default: 0.1)
+    """
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
     
     try:
-        # Initialize Azure OpenAI client
-        azure_model_client = AsyncAzureOpenAI(
-            api_key=os.getenv("AZURE_API_KEY", "AZURE_API_KEY"),
-            api_version="2025-01-01-preview",
-            azure_endpoint=os.getenv("AZURE_ENDPOINT", "AZURE_END_POINT")
-        )
-
-        # Initialize Azure Search client
-        azure_search_client = SearchClient(
-            endpoint=os.getenv("AZURE_SEARCH_ENDPOINT", "AZURE_SEARCH_ENDPOINT"),
-            index_name=os.getenv("INDEX_NAME", "INDEX_NAME"),
-            credential=AzureKeyCredential(os.getenv("AZURE_SEARCH_ADMIN_KEY", "AZURE_SEARCH_ADMIN_KEY"))
+        response_text, chunk_count = await generate_chat_response(
+            request.query, 
+            request.max_tokens, 
+            request.temperature
         )
         
-        print("✅ Azure clients initialized successfully")
+        return ChatResponse(
+            response=response_text,
+            context_chunks_count=chunk_count
+        )
         
-    except Exception as e:
-        print(f"❌ Error initializing clients: {e}")
+    except HTTPException:
         raise
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    global azure_search_client
-    if azure_search_client:
-        await azure_search_client.close()
-    print("🔄 Application shutdown complete")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
