@@ -44,7 +44,7 @@ from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from azure.core.credentials import AzureKeyCredential
 
-# LANGCHAIN-ONLY imports (No raw OpenAI client needed)
+# LANGCHAIN-ONLY imports
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
@@ -65,7 +65,7 @@ class LangChainResponse(BaseModel):
     response: str
     followup_qs: List[str]
 
-# LangChain GLOBAL Clients -> Initialize on startup
+# LangChain GLOBAL Clients
 langchain_chat_client = None
 langchain_embeddings_client = None
 azure_search_client = None
@@ -76,22 +76,22 @@ async def lifespan(app: FastAPI):
     global langchain_chat_client, langchain_embeddings_client, azure_search_client
     
     try:
-        # Initialize LangChain Azure Chat OpenAI client
+        # CORRECTED: Initialize LangChain Azure Chat OpenAI client
         langchain_chat_client = AzureChatOpenAI(
             azure_endpoint="AZURE_OPENAI_ENDPOINT",
             api_key="AZURE_OPENAI_KEY",
             api_version="2025-01-01-preview",
-            deployment_name="gpt-4o",
-            temperature=0.1,
-            max_tokens=1000
+            azure_deployment="gpt-4o",  # ✅ Correct parameter name
+            temperature=0.1
+            # ❌ Don't put max_tokens here - it goes in invoke()
         )
 
-        # Initialize LangChain Azure Embeddings client
+        # CORRECTED: Initialize LangChain Azure Embeddings client
         langchain_embeddings_client = AzureOpenAIEmbeddings(
             azure_endpoint="AZURE_OPENAI_ENDPOINT",
             api_key="AZURE_OPENAI_KEY",
             api_version="2025-01-01-preview",
-            deployment="text-embedding-ada-002",  # Your embedding model deployment name
+            azure_deployment="text-embedding-ada-002",  # ✅ Use azure_deployment
             model="text-embedding-ada-002"
         )
 
@@ -118,19 +118,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Pure LangChain PDF RAG Chatbot API",
     description="FastAPI application using exclusively LangChain for Azure OpenAI",
-    version="0.122.0",
+    version="0.123.0",
     lifespan=lifespan
 )
 
 async def langchain_query_vectorizer(query: str, embeddings_client):
     """Convert query to vector embedding using LangChain"""
     try:
-        # Use async embed_query method
-        embedding = await embeddings_client.aembed_query(query)
+        # Check if async method exists
+        if hasattr(embeddings_client, 'aembed_query'):
+            embedding = await embeddings_client.aembed_query(query)
+        else:
+            # Use sync method (LangChain will handle it)
+            embedding = embeddings_client.embed_query(query)
         return embedding
     except Exception as e:
-        print(f"Async embedding failed, trying sync: {e}")
-        # Fallback to sync method if async not available
+        print(f"Embedding error: {e}")
+        # Fallback to sync method
         embedding = embeddings_client.embed_query(query)
         return embedding
 
@@ -171,15 +175,14 @@ async def generate_langchain_only_response(user_query: str, max_tokens: int, tem
         
         current_context = "\n".join(context_chunks)
 
-        # Create a new client instance with updated parameters
-        # (LangChain clients are typically immutable)
+        # CORRECTED: Create a new client instance with updated parameters
         dynamic_chat_client = AzureChatOpenAI(
             azure_endpoint=langchain_chat_client.azure_endpoint,
             api_key=langchain_chat_client.api_key,
             api_version=langchain_chat_client.api_version,
-            deployment_name=langchain_chat_client.deployment_name,
-            temperature=temperature,
-            max_tokens=max_tokens
+            azure_deployment=langchain_chat_client.azure_deployment,  # ✅ Correct parameter
+            temperature=temperature
+            # ❌ max_tokens goes in invoke(), not here
         )
 
         # Create output parser for structured response
@@ -223,8 +226,11 @@ async def generate_langchain_only_response(user_query: str, max_tokens: int, tem
             format_instructions=parser.get_format_instructions()
         )
 
-        # Generate response using LangChain ONLY
-        response = await dynamic_chat_client.ainvoke(formatted_prompt.to_messages())
+        # CORRECTED: Generate response with max_tokens in invoke()
+        response = await dynamic_chat_client.ainvoke(
+            formatted_prompt.to_messages(),
+            config={"max_tokens": max_tokens}  # ✅ Pass max_tokens here
+        )
         
         # Parse the structured response
         try:
@@ -286,7 +292,7 @@ async def chat_endpoint(request: ChatRequest):
     LangChain-only chat endpoint
     
     - **query**: User's question or message
-    - **max_tokens**: Maximum tokens in response (default: 1000)
+    - **max_tokens**: Maximum tokens in response (default: 1000)  
     - **temperature**: Response creativity (0.0-1.0, default: 0.1)
     """
     if not request.query.strip():
@@ -331,3 +337,4 @@ async def chat_raw_endpoint(request: ChatRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
