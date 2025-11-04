@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Annotated
 import json
 import uuid
 from datetime import datetime, timedelta
@@ -13,17 +13,20 @@ from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from azure.core.credentials import AzureKeyCredential
 
-# Modern LangChain imports
+# LangChain 1.0.x imports
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import JsonOutputParser, PydanticOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.runnables import (
+    RunnablePassthrough, 
+    RunnableLambda,
+    Runnable,
+    RunnableConfig
+)
 from langchain.memory import ConversationBufferWindowMemory
-from langchain.schema.runnable import Runnable
-from langchain.callbacks.base import BaseCallbackHandler
 from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.callbacks import BaseCallbackHandler
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -31,15 +34,15 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 # Load environment variables
 load_dotenv()
 
-# Modern Pydantic models with Field validation
+# Pydantic models (v2.x compatible)
 class ChatRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=1000, description="User's chat query")
-    session_id: Optional[str] = Field(None, description="Optional session identifier")
-    max_tokens: Optional[int] = Field(800, ge=100, le=2000, description="Maximum tokens for response")
-    temperature: Optional[float] = Field(0.1, ge=0.0, le=2.0, description="Temperature for response generation")
+    query: Annotated[str, Field(min_length=1, max_length=1000, description="User's chat query")]
+    session_id: Annotated[Optional[str], Field(None, description="Optional session identifier")]
+    max_tokens: Annotated[Optional[int], Field(800, ge=100, le=4000, description="Maximum tokens for response")]
+    temperature: Annotated[Optional[float], Field(0.1, ge=0.0, le=2.0, description="Temperature for response generation")]
     
-    model_config = {
-        "json_schema_extra": {
+    class Config:
+        json_schema_extra = {
             "example": {
                 "query": "What is machine learning?",
                 "session_id": "optional-session-id",
@@ -47,18 +50,17 @@ class ChatRequest(BaseModel):
                 "temperature": 0.1
             }
         }
-    }
 
 class ChatResponse(BaseModel):
-    response: str = Field(..., description="AI assistant response")
-    followup_qs: List[str] = Field(..., description="Follow-up questions")
-    session_id: str = Field(..., description="Session identifier")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    response: Annotated[str, Field(description="AI assistant response")]
+    followup_qs: Annotated[List[str], Field(description="Follow-up questions")]
+    session_id: Annotated[str, Field(description="Session identifier")]
+    metadata: Annotated[Dict[str, Any], Field(default_factory=dict, description="Additional metadata")]
 
 class StructuredResponse(BaseModel):
     """Structured response model for LLM output parsing"""
-    response: str = Field(..., description="The main response to the user's query")
-    followup_qs: List[str] = Field(..., min_length=3, max_length=3, description="Exactly 3 follow-up questions")
+    response: Annotated[str, Field(description="The main response to the user's query")]
+    followup_qs: Annotated[List[str], Field(min_length=3, max_length=3, description="Exactly 3 follow-up questions")]
 
 class ConversationHistoryResponse(BaseModel):
     session_id: str
@@ -76,9 +78,9 @@ class SessionInfo(BaseModel):
     message_count: int
     memory_window_size: int
 
-# Modern in-memory session manager with ConversationBufferWindowMemory
+# Modern in-memory session manager compatible with LangChain 1.0.x
 class ModernMemoryManager:
-    """Modern session manager using ConversationBufferWindowMemory"""
+    """Session manager using ConversationBufferWindowMemory for LangChain 1.0.x"""
     
     def __init__(self, memory_window_size: int = 5, session_timeout_hours: int = 24):
         self.sessions: Dict[str, Dict[str, Any]] = {}
@@ -87,22 +89,22 @@ class ModernMemoryManager:
         self._lock = asyncio.Lock()
     
     def create_session(self, session_id: Optional[str] = None) -> str:
-        """Create new session with modern ConversationBufferWindowMemory"""
+        """Create new session with ConversationBufferWindowMemory"""
         session_id = session_id or str(uuid.uuid4())
         
-        # Create modern ChatMessageHistory for the session
+        # Create ChatMessageHistory for the session
         chat_history = ChatMessageHistory()
         
-        # Create ConversationBufferWindowMemory with modern configuration
+        # Create ConversationBufferWindowMemory with LangChain 1.0.x configuration
         memory = ConversationBufferWindowMemory(
             k=self.memory_window_size,
             chat_memory=chat_history,
             memory_key="chat_history",
             input_key="input",
             output_key="output",
-            return_messages=True,  # Return as message objects instead of strings
-            human_prefix="User",
-            ai_prefix="Assistant"
+            return_messages=True,
+            human_prefix="Human",
+            ai_prefix="AI"
         )
         
         self.sessions[session_id] = {
@@ -162,7 +164,6 @@ class ModernMemoryManager:
                 return None
             
             session = self.sessions[session_id]
-            memory = session["memory"]
             
             return SessionInfo(
                 session_id=session_id,
@@ -224,38 +225,44 @@ class ModernMemoryManager:
                 ))
             return session_infos
 
-# Modern callback handler for logging
+# Callback handler for LangChain 1.0.x
 class ConversationCallbackHandler(BaseCallbackHandler):
-    """Custom callback handler for conversation logging"""
+    """Custom callback handler for conversation logging (LangChain 1.0.x compatible)"""
     
     def __init__(self, session_id: str):
+        super().__init__()
         self.session_id = session_id
         self.start_time = None
     
-    def on_chain_start(self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs) -> None:
+    def on_chain_start(
+        self, 
+        serialized: Dict[str, Any], 
+        inputs: Dict[str, Any], 
+        **kwargs: Any
+    ) -> None:
         self.start_time = datetime.now()
         print(f"🔄 Chain started for session {self.session_id}")
     
-    def on_chain_end(self, outputs: Dict[str, Any], **kwargs) -> None:
+    def on_chain_end(self, outputs: Dict[str, Any], **kwargs: Any) -> None:
         if self.start_time:
             duration = datetime.now() - self.start_time
             print(f"✅ Chain completed for session {self.session_id} in {duration.total_seconds():.2f}s")
     
-    def on_chain_error(self, error: Exception, **kwargs) -> None:
+    def on_chain_error(self, error: Exception, **kwargs: Any) -> None:
         print(f"❌ Chain error for session {self.session_id}: {error}")
 
-# Modern LangChain Chain with ConversationBufferWindowMemory
+# Modern LangChain Chain compatible with 1.0.x
 class ModernMemoryRAGChain:
-    """Modern LangChain chain using ConversationBufferWindowMemory and LCEL"""
+    """LangChain 1.0.x compatible chain using ConversationBufferWindowMemory"""
     
     def __init__(self, llm: AzureChatOpenAI, session_id: str, memory_manager: ModernMemoryManager):
         self.llm = llm
         self.session_id = session_id
         self.memory_manager = memory_manager
         
-        # Modern prompt template with better structure
+        # Prompt template compatible with LangChain 1.0.x
         self.prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="""You are an intelligent AI assistant with conversation memory. 
+            ("system", """You are an intelligent AI assistant with conversation memory. 
 Your responses should be contextually aware, referencing previous conversation when relevant.
 
 Current context from knowledge base:
@@ -270,14 +277,14 @@ Instructions:
 Respond in valid JSON format:
 {format_instructions}"""),
             MessagesPlaceholder(variable_name="chat_history"),
-            HumanMessage(content="{input}")
+            ("human", "{input}")
         ])
         
-        # Modern output parser
+        # Output parser for LangChain 1.0.x
         self.output_parser = PydanticOutputParser(pydantic_object=StructuredResponse)
     
-    async def ainvoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Modern async invocation with ConversationBufferWindowMemory"""
+    async def ainvoke(self, input_data: Dict[str, Any], config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+        """Async invocation compatible with LangChain 1.0.x"""
         try:
             # Get memory for the session
             memory = await self.memory_manager.get_session_memory(self.session_id)
@@ -288,28 +295,38 @@ Respond in valid JSON format:
             memory_variables = memory.load_memory_variables({})
             chat_history = memory_variables.get("chat_history", [])
             
-            # Create the chain using LCEL
+            # Create the runnable chain for LangChain 1.0.x
+            def add_format_instructions(inputs: Dict[str, Any]) -> Dict[str, Any]:
+                inputs["format_instructions"] = self.output_parser.get_format_instructions()
+                return inputs
+            
+            # Build chain using LangChain 1.0.x patterns
             chain = (
-                RunnablePassthrough.assign(
-                    format_instructions=lambda _: self.output_parser.get_format_instructions()
-                )
-                | self.prompt
-                | self.llm
+                RunnableLambda(add_format_instructions)
+                | self.prompt 
+                | self.llm 
                 | self.output_parser
             )
             
-            # Add callback handler
+            # Prepare input with chat history
+            chain_input = {
+                "input": input_data["input"],
+                "context": input_data.get("context", ""),
+                "chat_history": chat_history
+            }
+            
+            # Add callback handler if config provided
+            if config is None:
+                config = RunnableConfig()
+            
             callback_handler = ConversationCallbackHandler(self.session_id)
+            if config.get("callbacks"):
+                config["callbacks"].append(callback_handler)
+            else:
+                config["callbacks"] = [callback_handler]
             
             # Invoke chain
-            result = await chain.ainvoke(
-                {
-                    "input": input_data["input"],
-                    "context": input_data.get("context", ""),
-                    "chat_history": chat_history
-                },
-                config={"callbacks": [callback_handler]}
-            )
+            result = await chain.ainvoke(chain_input, config)
             
             # Save the interaction to memory
             memory.save_context(
@@ -326,7 +343,7 @@ Respond in valid JSON format:
             }
             
         except Exception as e:
-            print(f"❌ Modern memory chain invocation error: {e}")
+            print(f"❌ Chain invocation error: {e}")
             # Fallback response
             return {
                 "response": "I apologize, but I encountered an error processing your request. Please try again.",
@@ -338,14 +355,14 @@ Respond in valid JSON format:
             }
 
 # Global clients and memory manager
-langchain_chat_client = None
-langchain_embeddings_client = None
-azure_search_client = None
-memory_manager = None
+langchain_chat_client: Optional[AzureChatOpenAI] = None
+langchain_embeddings_client: Optional[AzureOpenAIEmbeddings] = None
+azure_search_client: Optional[SearchClient] = None
+memory_manager: Optional[ModernMemoryManager] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Modern lifespan management with in-memory storage"""
+    """Lifespan management for LangChain 1.0.x"""
     global langchain_chat_client, langchain_embeddings_client, azure_search_client, memory_manager
     
     try:
@@ -362,14 +379,14 @@ async def lifespan(app: FastAPI):
             session_timeout_hours=24
         )
         
-        # Initialize modern LangChain clients
+        # Initialize LangChain 1.0.x clients
         langchain_chat_client = AzureChatOpenAI(
             azure_endpoint=azure_openai_endpoint,
             api_key=azure_openai_key,
             api_version="2024-06-01",
             azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
             temperature=0.1,
-            streaming=True,  # Enable streaming
+            max_tokens=None,  # LangChain 1.0.x pattern
             model_kwargs={
                 "top_p": 0.9,
                 "frequency_penalty": 0.0,
@@ -391,7 +408,7 @@ async def lifespan(app: FastAPI):
             credential=AzureKeyCredential(os.getenv("AZURE_SEARCH_ADMIN_KEY"))
         )
         
-        print("✅ Modern LangChain application with memory initialized successfully")
+        print("✅ LangChain 1.0.x application initialized successfully")
         
         # Start background tasks
         cleanup_task = asyncio.create_task(periodic_maintenance())
@@ -406,7 +423,7 @@ async def lifespan(app: FastAPI):
         if azure_search_client:
             await azure_search_client.close()
         
-        print("✅ Modern application shutdown completed")
+        print("✅ Application shutdown completed")
         
     except Exception as e:
         print(f"❌ Application initialization error: {e}")
@@ -426,40 +443,49 @@ async def periodic_maintenance():
         except Exception as e:
             print(f"❌ Maintenance error: {e}")
 
-# Modern dependency injection
+# Dependency injection functions
 async def get_memory_manager() -> ModernMemoryManager:
     """Dependency to get memory manager"""
+    if memory_manager is None:
+        raise HTTPException(status_code=503, detail="Memory manager not initialized")
     return memory_manager
 
 async def get_llm_client() -> AzureChatOpenAI:
     """Dependency to get LLM client"""
+    if langchain_chat_client is None:
+        raise HTTPException(status_code=503, detail="LLM client not initialized")
     return langchain_chat_client
 
-# Modern FastAPI app
+# FastAPI app
 app = FastAPI(
-    title="Modern LangChain RAG API with In-Memory Storage",
+    title="LangChain 1.0.x RAG API with In-Memory Storage",
     version="1.0.0",
-    description="Advanced RAG chatbot with ConversationBufferWindowMemory using latest LangChain patterns",
+    description="RAG chatbot with ConversationBufferWindowMemory using LangChain 1.0.x",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
 )
 
-# Modern API endpoints
+# API endpoints
 @app.get("/", tags=["Health"])
 async def health_check():
-    """Modern health check endpoint"""
+    """Health check endpoint"""
     active_sessions = await memory_manager.get_active_sessions_count() if memory_manager else 0
     
     return {
         "status": "healthy",
-        "service": "Modern LangChain RAG API with Memory",
+        "service": "LangChain 1.0.x RAG API with Memory",
         "version": "1.0.0",
-        "langchain_version": "0.1.5",
+        "langchain_versions": {
+            "langchain": "1.0.2",
+            "langchain-openai": "1.0.1",
+            "langchain-community": "0.4.1",
+            "langchain-core": "1.0.1"
+        },
         "memory_type": "ConversationBufferWindowMemory",
         "active_sessions": active_sessions,
         "features": [
-            "Modern LCEL chains",
+            "LangChain 1.0.x compatibility",
             "ConversationBufferWindowMemory", 
             "In-memory session management",
             "Structured output parsing",
@@ -469,7 +495,7 @@ async def health_check():
     }
 
 async def get_embeddings(query: str) -> List[float]:
-    """Modern embeddings with error handling"""
+    """Get embeddings using LangChain 1.0.x"""
     try:
         embeddings = await langchain_embeddings_client.aembed_query(query)
         return embeddings
@@ -478,7 +504,7 @@ async def get_embeddings(query: str) -> List[float]:
         raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(e)}")
 
 async def search_documents(query: str) -> str:
-    """Modern document search with optimization"""
+    """Document search with Azure Cognitive Search"""
     try:
         query_vector = await get_embeddings(query)
         
@@ -508,12 +534,12 @@ async def search_documents(query: str) -> str:
         return ""
 
 @app.post("/chat", response_model=ChatResponse, tags=["Chat"])
-async def modern_memory_chat_endpoint(
+async def chat_endpoint(
     request: ChatRequest,
     memory_manager: ModernMemoryManager = Depends(get_memory_manager),
     llm_client: AzureChatOpenAI = Depends(get_llm_client)
 ):
-    """Modern chat endpoint with ConversationBufferWindowMemory"""
+    """Chat endpoint with ConversationBufferWindowMemory"""
     try:
         # Generate or use provided session ID
         session_id = request.session_id or memory_manager.create_session()
@@ -522,7 +548,7 @@ async def modern_memory_chat_endpoint(
         if request.session_id and await memory_manager.get_session_memory(request.session_id) is None:
             session_id = memory_manager.create_session(request.session_id)
         
-        print(f"🔄 Processing modern memory chat - Session: {session_id}")
+        print(f"🔄 Processing chat - Session: {session_id}")
         
         # Get context from search
         context = await search_documents(request.query)
@@ -537,7 +563,7 @@ async def modern_memory_chat_endpoint(
             max_tokens=request.max_tokens
         )
         
-        # Create modern RAG chain with memory
+        # Create RAG chain with memory
         rag_chain = ModernMemoryRAGChain(
             llm=dynamic_llm,
             session_id=session_id,
@@ -557,12 +583,13 @@ async def modern_memory_chat_endpoint(
             metadata={
                 "context_length": len(context),
                 "processing_time": datetime.utcnow().isoformat(),
-                "memory_type": "ConversationBufferWindowMemory"
+                "memory_type": "ConversationBufferWindowMemory",
+                "langchain_version": "1.0.2"
             }
         )
         
     except Exception as e:
-        print(f"❌ Modern memory chat error: {e}")
+        print(f"❌ Chat error: {e}")
         raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
 
 @app.get("/chat/history/{session_id}", response_model=ConversationHistoryResponse, tags=["Memory"])
@@ -664,13 +691,17 @@ async def get_session_stats(
                 "storage": "In-Memory"
             },
             "system_info": {
-                "langchain_version": "0.1.5",
+                "langchain_versions": {
+                    "langchain": "1.0.2",
+                    "langchain-openai": "1.0.1",
+                    "langchain-community": "0.4.1",
+                    "langchain-core": "1.0.1"
+                },
                 "features": [
-                    "Modern LCEL chains",
+                    "LangChain 1.0.x compatibility",
                     "ConversationBufferWindowMemory",
                     "In-memory session management",
-                    "Structured output parsing",
-                    "Real-time analytics"
+                    "Structured output parsing"
                 ]
             },
             "timestamp": datetime.utcnow().isoformat()
@@ -700,6 +731,7 @@ async def list_active_sessions(
             ],
             "total_count": len(sessions),
             "memory_type": "ConversationBufferWindowMemory",
+            "langchain_version": "1.0.2",
             "timestamp": datetime.utcnow().isoformat()
         }
         
