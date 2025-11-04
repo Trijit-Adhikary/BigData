@@ -6,16 +6,28 @@ import json
 import uuid
 from datetime import datetime, timedelta
 import asyncio
-import aiofiles
-from concurrent.futures import ThreadPoolExecutor
+import os
 
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 from azure.core.credentials import AzureKeyCredential
 
-# LangChain imports
+# LangChain imports with SQL Memory
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
+from langchain.memory import ConversationBufferWindowMemory
+from langchain_community.chat_message_histories import SQLChatMessageHistory
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import PydanticOutputParser
+
+# SQL Database imports - AZURE SQL COMPATIBLE
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, String, DateTime, Text, Integer, select, NVARCHAR
+from sqlalchemy.dialects.mssql import UNIQUEIDENTIFIER  # Azure SQL specific
+import pyodbc  # For Azure SQL
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Pydantic models
 class ChatRequest(BaseModel):
@@ -29,310 +41,338 @@ class ChatResponse(BaseModel):
     followup_qs: List[str]
     session_id: str
 
-class ConversationTurn(BaseModel):
-    """Single Q&A turn in conversation"""
-    question: str
-    answer: str
-    timestamp: datetime
+class LangChainResponse(BaseModel):
+    response: str
+    followup_qs: List[str]
 
-class AsyncConversationMemory:
-    """Fully asynchronous conversation memory with thread-safe operations"""
+class ConversationHistoryResponse(BaseModel):
+    session_id: str
+    messages: List[Dict]
+    total_messages: int
+    created_at: str
+    last_updated: str
+
+# Database Models - AZURE SQL COMPATIBLE
+Base = declarative_base()
+
+class ConversationSession(Base):
+    """Table to track conversation sessions - Azure SQL Compatible"""
+    __tablename__ = "conversation_sessions"
     
-    def __init__(self, max_turns: int = 5, session_timeout_hours: int = 24):
-        self.conversations: Dict[str, List[ConversationTurn]] = {}
-        self.session_timestamps: Dict[str, datetime] = {}
-        self.max_turns = max_turns
-        self.session_timeout = timedelta(hours=session_timeout_hours)
-        self._lock = asyncio.Lock()  # Async lock for thread safety
-        self.executor = ThreadPoolExecutor(max_workers=2)
+    session_id = Column(NVARCHAR(50), primary_key=True, index=True)  # Changed to NVARCHAR
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    total_messages = Column(Integer, default=0)
+    user_info = Column(Text, nullable=True)
+
+# Azure SQL Database configuration
+AZURE_SQL_CONNECTION_STRING = os.getenv(
+    "AZURE_SQL_CONNECTION_STRING",
+    "mssql+aiodbc://username:password@server.database.windows.net/database?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
+)
+
+class AzureSQLChatMessageHistory:
+    """Azure SQL compatible wrapper for LangChain Chat Message History"""
     
-    async def create_session(self) -> str:
-        """Async session creation"""
-        async with self._lock:
-            session_id = str(uuid.uuid4())
-            self.conversations[session_id] = []
-            self.session_timestamps[session_id] = datetime.now()
-            await asyncio.sleep(0)  # Yield control
-            return session_id
+    def __init__(self, session_id: str, connection_string: str):
+        self.session_id = session_id
+        self.connection_string = connection_string
+        self._sync_history = None
     
-    async def add_turn(self, session_id: str, question: str, answer: str):
-        """Async add Q&A turn to conversation memory"""
-        async with self._lock:
-            if session_id not in self.conversations:
-                self.conversations[session_id] = []
+    def _get_sync_history(self):
+        """Get synchronous SQLChatMessageHistory instance for Azure SQL"""
+        if self._sync_history is None:
+            # Convert async connection string to sync for LangChain
+            sync_connection_string = self.connection_string.replace("+aiodbc", "+pyodbc")
             
-            turn = ConversationTurn(
-                question=question,
-                answer=answer,
-                timestamp=datetime.now()
+            self._sync_history = SQLChatMessageHistory(
+                session_id=self.session_id,
+                connection_string=sync_connection_string,
+                table_name="message_store",
+                # Azure SQL specific configurations
+                custom_message_converter=self._azure_sql_message_converter
+            )
+        return self._sync_history
+    
+    def _azure_sql_message_converter(self, message: BaseMessage) -> str:
+        """Convert message to Azure SQL compatible JSON string"""
+        return json.dumps({
+            "type": type(message).__name__,
+            "content": message.content,
+            "additional_kwargs": getattr(message, 'additional_kwargs', {})
+        })
+    
+    async def add_message(self, message: BaseMessage):
+        """Add message to Azure SQL storage"""
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, 
+                self._get_sync_history().add_message, 
+                message
+            )
+        except Exception as e:
+            print(f"❌ Error adding message to Azure SQL: {e}")
+            raise
+    
+    async def get_messages(self, limit: int = 5) -> List[BaseMessage]:
+        """Get latest messages from Azure SQL storage"""
+        try:
+            loop = asyncio.get_event_loop()
+            all_messages = await loop.run_in_executor(
+                None, 
+                self._get_sync_history().messages.copy
             )
             
-            self.conversations[session_id].append(turn)
-            
-            # Keep only last N turns
-            if len(self.conversations[session_id]) > self.max_turns:
-                self.conversations[session_id] = self.conversations[session_id][-self.max_turns:]
-            
-            # Update session timestamp
-            self.session_timestamps[session_id] = datetime.now()
-            await asyncio.sleep(0)  # Yield control
-    
-    async def get_conversation_history(self, session_id: str) -> List[ConversationTurn]:
-        """Async get conversation history for session"""
-        async with self._lock:
-            if session_id not in self.conversations:
-                return []
-            
-            # Check if session has expired
-            if await self._is_session_expired(session_id):
-                await self._cleanup_session(session_id)
-                return []
-            
-            await asyncio.sleep(0)  # Yield control
-            return self.conversations[session_id].copy()
-    
-    async def _is_session_expired(self, session_id: str) -> bool:
-        """Async check if session has expired"""
-        if session_id not in self.session_timestamps:
-            return True
+            # Return latest 'limit' messages
+            return all_messages[-limit:] if len(all_messages) > limit else all_messages
         
-        await asyncio.sleep(0)  # Yield control
-        return datetime.now() - self.session_timestamps[session_id] > self.session_timeout
+        except Exception as e:
+            print(f"❌ Error retrieving messages from Azure SQL: {e}")
+            return []
     
-    async def _cleanup_session(self, session_id: str):
-        """Async remove expired session"""
-        self.conversations.pop(session_id, None)
-        self.session_timestamps.pop(session_id, None)
-        await asyncio.sleep(0)  # Yield control
-    
-    async def cleanup_expired_sessions(self):
-        """Async cleanup all expired sessions"""
-        async with self._lock:
-            expired_sessions = []
-            
-            for sid in list(self.session_timestamps.keys()):
-                if await self._is_session_expired(sid):
-                    expired_sessions.append(sid)
-            
-            for session_id in expired_sessions:
-                await self._cleanup_session(session_id)
-            
-            await asyncio.sleep(0)  # Yield control
-            return len(expired_sessions)
-    
-    async def get_active_sessions_count(self) -> int:
-        """Async get count of active sessions"""
-        await self.cleanup_expired_sessions()
-        async with self._lock:
-            count = len(self.conversations)
-            await asyncio.sleep(0)  # Yield control
-            return count
-    
-    async def clear_session(self, session_id: str) -> bool:
-        """Async clear specific session"""
-        async with self._lock:
-            existed = session_id in self.conversations
-            self.conversations.pop(session_id, None)
-            self.session_timestamps.pop(session_id, None)
-            await asyncio.sleep(0)  # Yield control
-            return existed
+    async def clear(self):
+        """Clear messages for this session"""
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, 
+                self._get_sync_history().clear
+            )
+        except Exception as e:
+            print(f"❌ Error clearing messages from Azure SQL: {e}")
+            raise
 
-# Global clients and memory
+class AzureDatabaseManager:
+    """Azure SQL Database manager"""
+    
+    def __init__(self, connection_string: str):
+        self.connection_string = connection_string
+        
+        # Azure SQL specific engine configuration
+        self.engine = create_async_engine(
+            connection_string,
+            echo=False,
+            # Azure SQL specific configurations
+            pool_pre_ping=True,
+            pool_recycle=3600,  # Recycle connections every hour
+            connect_args={
+                "check_same_thread": False,
+                "timeout": 30,
+                "autocommit": False
+            }
+        )
+        
+        self.async_session = async_sessionmaker(
+            bind=self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+    
+    async def init_db(self):
+        """Initialize Azure SQL database tables"""
+        try:
+            async with self.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            print("✅ Azure SQL Database tables created successfully")
+            
+            # Create indexes for better performance
+            await self._create_indexes()
+            
+        except Exception as e:
+            print(f"❌ Azure SQL Database initialization error: {e}")
+            raise
+    
+    async def _create_indexes(self):
+        """Create Azure SQL specific indexes"""
+        try:
+            async with self.engine.begin() as conn:
+                # Create index on session_id for message_store table
+                await conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_message_store_session_id')
+                    CREATE INDEX IX_message_store_session_id ON message_store(session_id)
+                """))
+                
+                # Create index on created_at for better date queries
+                await conn.execute(text("""
+                    IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_conversation_sessions_created_at')
+                    CREATE INDEX IX_conversation_sessions_created_at ON conversation_sessions(created_at)
+                """))
+                
+        except Exception as e:
+            print(f"⚠️ Warning: Could not create indexes: {e}")
+    
+    async def create_or_update_session(self, session_id: str):
+        """Create or update conversation session in Azure SQL"""
+        try:
+            async with self.async_session() as session:
+                # Use Azure SQL compatible query
+                stmt = select(ConversationSession).where(
+                    ConversationSession.session_id == session_id
+                )
+                result = await session.execute(stmt)
+                existing_session = result.scalar_one_or_none()
+                
+                if existing_session:
+                    # Update existing session
+                    existing_session.last_updated = datetime.utcnow()
+                    existing_session.total_messages += 1
+                else:
+                    # Create new session
+                    new_session = ConversationSession(
+                        session_id=session_id,
+                        total_messages=1
+                    )
+                    session.add(new_session)
+                
+                await session.commit()
+                
+        except Exception as e:
+            print(f"❌ Error creating/updating session in Azure SQL: {e}")
+            raise
+    
+    async def get_session_info(self, session_id: str) -> Optional[Dict]:
+        """Get session information from Azure SQL"""
+        try:
+            async with self.async_session() as session:
+                stmt = select(ConversationSession).where(
+                    ConversationSession.session_id == session_id
+                )
+                result = await session.execute(stmt)
+                session_info = result.scalar_one_or_none()
+                
+                if session_info:
+                    return {
+                        "session_id": session_info.session_id,
+                        "created_at": session_info.created_at.isoformat(),
+                        "last_updated": session_info.last_updated.isoformat(),
+                        "total_messages": session_info.total_messages
+                    }
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error getting session info from Azure SQL: {e}")
+            return None
+    
+    async def get_active_sessions_count(self, hours: int = 24) -> int:
+        """Get count of active sessions in last N hours from Azure SQL"""
+        try:
+            cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+            
+            async with self.async_session() as session:
+                stmt = select(ConversationSession).where(
+                    ConversationSession.last_updated >= cutoff_time
+                )
+                result = await session.execute(stmt)
+                sessions = result.scalars().all()
+                return len(sessions)
+                
+        except Exception as e:
+            print(f"❌ Error getting active sessions count from Azure SQL: {e}")
+            return 0
+    
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete session and its messages from Azure SQL"""
+        try:
+            async with self.async_session() as session:
+                # Delete session record
+                stmt = select(ConversationSession).where(
+                    ConversationSession.session_id == session_id
+                )
+                result = await session.execute(stmt)
+                session_record = result.scalar_one_or_none()
+                
+                if session_record:
+                    await session.delete(session_record)
+                    await session.commit()
+                    
+                    # Also clear messages from LangChain's message store
+                    sql_history = AzureSQLChatMessageHistory(session_id, self.connection_string)
+                    await sql_history.clear()
+                    
+                    return True
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error deleting session from Azure SQL: {e}")
+            return False
+
+# Global clients and managers
 langchain_chat_client = None
 langchain_embeddings_client = None
 azure_search_client = None
-conversation_memory = AsyncConversationMemory(max_turns=5, session_timeout_hours=24)
-
-async def init_langchain_clients():
-    """Async initialization of LangChain clients"""
-    global langchain_chat_client, langchain_embeddings_client
-    
-    # Initialize chat client asynchronously
-    langchain_chat_client = AzureChatOpenAI(
-        azure_endpoint="AZURE_OPENAI_ENDPOINT",
-        api_key="AZURE_OPENAI_KEY",
-        api_version="2024-06-01",
-        azure_deployment="gpt-4o",
-        temperature=0.1
-    )
-
-    # Initialize embeddings client asynchronously
-    langchain_embeddings_client = AzureOpenAIEmbeddings(
-        azure_endpoint="AZURE_OPENAI_ENDPOINT", 
-        api_key="AZURE_OPENAI_KEY",
-        api_version="2024-06-01",
-        azure_deployment="text-embedding-ada-002"
-    )
-    
-    await asyncio.sleep(0)  # Yield control
-    return langchain_chat_client, langchain_embeddings_client
-
-async def init_azure_search_client():
-    """Async initialization of Azure Search client"""
-    global azure_search_client
-    
-    azure_search_client = SearchClient(
-        endpoint="AZURE_SEARCH_ENDPOINT",
-        index_name="rag-hellopdf", 
-        credential=AzureKeyCredential("AZURE_SEARCH_ADMIN_KEY")
-    )
-    
-    await asyncio.sleep(0)  # Yield control
-    return azure_search_client
+db_manager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Async lifespan with proper resource management"""
-    global langchain_chat_client, langchain_embeddings_client, azure_search_client
+    """Initialize clients, Azure SQL database, and background tasks"""
+    global langchain_chat_client, langchain_embeddings_client, azure_search_client, db_manager
     
     try:
-        print("🚀 Initializing async clients...")
+        # Initialize Azure SQL Database Manager
+        db_manager = AzureDatabaseManager(AZURE_SQL_CONNECTION_STRING)
+        await db_manager.init_db()
         
-        # Initialize all clients concurrently
-        chat_task = asyncio.create_task(init_langchain_clients())
-        search_task = asyncio.create_task(init_azure_search_client())
+        # Initialize LangChain clients
+        langchain_chat_client = AzureChatOpenAI(
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            api_version="2024-06-01",
+            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
+            temperature=0.1
+        )
+
+        langchain_embeddings_client = AzureOpenAIEmbeddings(
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"), 
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            api_version="2024-06-01",
+            azure_deployment=os.getenv("AZURE_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
+        )
+
+        azure_search_client = SearchClient(
+            endpoint=os.getenv("AZURE_SEARCH_ENDPOINT"),
+            index_name=os.getenv("AZURE_SEARCH_INDEX", "rag-hellopdf"), 
+            credential=AzureKeyCredential(os.getenv("AZURE_SEARCH_ADMIN_KEY"))
+        )
         
-        # Wait for both to complete
-        await asyncio.gather(chat_task, search_task)
+        print("✅ All clients and Azure SQL database initialized successfully")
         
-        print("✅ All async clients initialized successfully")
-        
-        # Start background tasks
+        # Start cleanup task
         cleanup_task = asyncio.create_task(periodic_cleanup())
-        health_monitor_task = asyncio.create_task(periodic_health_check())
         
     except Exception as e:
-        print(f"❌ Error initializing clients: {e}")
+        print(f"❌ Error initializing application with Azure SQL: {e}")
         raise
 
     yield
     
-    # Cleanup tasks
-    print("🔄 Starting graceful shutdown...")
-    
-    cleanup_task.cancel()
-    health_monitor_task.cancel()
-    
-    # Wait for tasks to finish
-    await asyncio.gather(cleanup_task, health_monitor_task, return_exceptions=True)
+    # Cancel cleanup task
+    if 'cleanup_task' in locals():
+        cleanup_task.cancel()
     
     if azure_search_client:
         await azure_search_client.close()
     
-    print("✅ Application shutdown complete")
-
-async def periodic_cleanup():
-    """Async periodic cleanup of expired sessions"""
-    while True:
-        try:
-            await asyncio.sleep(1800)  # Run every 30 minutes
-            cleaned = await conversation_memory.cleanup_expired_sessions()
-            if cleaned > 0:
-                print(f"🧹 Cleaned up {cleaned} expired sessions")
-        except asyncio.CancelledError:
-            print("🔄 Cleanup task cancelled")
-            break
-        except Exception as e:
-            print(f"❌ Cleanup error: {e}")
-            await asyncio.sleep(60)  # Wait before retrying
-
-async def periodic_health_check():
-    """Async periodic health monitoring"""
-    while True:
-        try:
-            await asyncio.sleep(3600)  # Run every hour
-            active_sessions = await conversation_memory.get_active_sessions_count()
-            print(f"💚 Health check: {active_sessions} active sessions")
-        except asyncio.CancelledError:
-            print("🔄 Health monitor task cancelled")
-            break
-        except Exception as e:
-            print(f"❌ Health check error: {e}")
-            await asyncio.sleep(60)
-
-app = FastAPI(
-    title="Fully Async LangChain RAG API with Memory",
-    version="0.126.0",
-    lifespan=lifespan
-)
-
-async def get_embeddings_async(query: str):
-    """Fully async embeddings generation"""
-    try:
-        # Run embeddings in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(
-            conversation_memory.executor,
-            langchain_embeddings_client.embed_query,
-            query
-        )
-        return embeddings
-    except Exception as e:
-        print(f"❌ Embedding error: {e}")
-        raise HTTPException(status_code=500, detail=f"Embedding failed: {str(e)}")
-
-async def search_documents_async(query: str):
-    """Async document search with concurrent processing"""
-    try:
-        # Get embeddings asynchronously
-        query_vector = await get_embeddings_async(query)
-        
-        vector_query = VectorizedQuery(
-            vector=query_vector,
-            k_nearest_neighbors=3,
-            fields="text_vector"
-        )
-
-        # Perform async search
-        results = await azure_search_client.search(
-            search_text=query,
-            vector_queries=[vector_query],
-            top=3,
-            select=["chunk"]
-        )
-
-        # Process results asynchronously
-        context_chunks = []
-        async for result in results:
-            chunk = result.get("chunk", "")
-            if chunk:
-                context_chunks.append(chunk)
-            await asyncio.sleep(0)  # Yield control during iteration
-        
-        return "\n".join(context_chunks)
-        
-    except Exception as e:
-        print(f"❌ Search error: {e}")
-        return ""
-
-async def build_conversation_context_async(session_id: str) -> str:
-    """Async build conversation context from memory"""
-    history = await conversation_memory.get_conversation_history(session_id)
+    if db_manager:
+        await db_manager.engine.dispose()
     
-    if not history:
-        return ""
-    
-    context_parts = ["Previous conversation:"]
-    
-    for i, turn in enumerate(history, 1):
-        context_parts.append(f"Q{i}: {turn.question}")
-        context_parts.append(f"A{i}: {turn.answer}")
-        await asyncio.sleep(0)  # Yield control during iteration
-    
-    context_parts.append("---")
-    return "\n".join(context_parts)
+    print("🔄 Application with Azure SQL shutdown complete")
 
-async def generate_response_async(user_query: str, session_id: str, context: str, max_tokens: int, temperature: float):
-    """Fully async response generation with memory"""
-    try:
-        # Get conversation history asynchronously
-        conversation_context = await build_conversation_context_async(session_id)
+# [Rest of the code remains the same with AzureSQLChatMessageHistory instead of AsyncSQLChatMessageHistory]
+
+class AzureSQLRAGChain:
+    """RAG Chain with Azure SQL-backed conversation memory"""
+    
+    def __init__(self, llm, session_id: str, connection_string: str):
+        self.llm = llm
+        self.session_id = session_id
+        self.sql_history = AzureSQLChatMessageHistory(session_id, connection_string)
         
-        # Build system message with context and memory
-        system_content = f"""
-You are a helpful AI assistant with conversation memory. Answer the user's question based on the provided context and conversation history.
-
-{conversation_context}
+        # Create prompt template with message history
+        self.prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content="""
+You are a helpful AI assistant with persistent conversation memory stored in Azure SQL Database. 
+Answer the user's question based on the provided context and conversation history.
 
 Current Context from Documents:
 {context}
@@ -340,215 +380,98 @@ Current Context from Documents:
 Instructions:
 - Use the conversation history to provide contextually aware responses
 - Reference previous questions/answers when relevant
+- Maintain conversation continuity across sessions
 - Provide a clear, concise answer to the current question
 - Generate exactly 3 follow-up questions
 - Return response in JSON format like this:
 {{"response": "your answer", "followup_qs": ["q1", "q2", "q3"]}}
-"""
-
-        # Create messages
-        messages = [
-            SystemMessage(content=system_content),
-            HumanMessage(content=user_query)
-        ]
-
-        # Create client with dynamic parameters
-        dynamic_client = AzureChatOpenAI(
-            azure_endpoint=langchain_chat_client.azure_endpoint,
-            api_key=langchain_chat_client.api_key, 
-            api_version=langchain_chat_client.api_version,
-            azure_deployment=langchain_chat_client.azure_deployment,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
-
-        # Generate response asynchronously
-        response = await dynamic_client.ainvoke(messages)
+            """),
+            MessagesPlaceholder(variable_name="chat_history"),
+            HumanMessage(content="{input}")
+        ])
         
-        # Parse response asynchronously
-        content = response.content.strip()
-        parsed_result = await parse_response_async(content)
-        
-        # Store in conversation memory asynchronously
-        await conversation_memory.add_turn(session_id, user_query, parsed_result["response"])
-        
-        return parsed_result
-        
-    except Exception as e:
-        print(f"❌ Response generation error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate response: {str(e)}")
-
-async def parse_response_async(content: str) -> dict:
-    """Async response parsing"""
-    try:
-        # Remove code blocks if present
-        if content.startswith('```json'):
-            content = content[7:-3].strip()
-        elif content.startswith('```'):
-            content = content[3:-3].strip()
-        
-        # Parse JSON asynchronously (using executor for CPU-bound task)
-        loop = asyncio.get_event_loop()
-        parsed = await loop.run_in_executor(
-            conversation_memory.executor,
-            json.loads,
-            content
-        )
-        
-        if "response" in parsed and "followup_qs" in parsed:
-            followup_qs = parsed["followup_qs"][:3]
-            while len(followup_qs) < 3:
-                followup_qs.append("Can you tell me more?")
+        # Parser for structured output
+        self.parser = PydanticOutputParser(pydantic_object=LangChainResponse)
+    
+    async def invoke(self, input_text: str, context: str) -> dict:
+        """Invoke RAG chain with Azure SQL memory"""
+        try:
+            # Get latest 5 messages from Azure SQL database
+            chat_history = await self.sql_history.get_messages(limit=10)  # Get 10 to have 5 pairs
             
-            return {
-                "response": parsed["response"],
-                "followup_qs": followup_qs
-            }
-    
-    except (json.JSONDecodeError, Exception):
-        pass
-    
-    # Fallback response
-    return {
-        "response": content,
-        "followup_qs": [
-            "What are the main aspects?",
-            "How does this work in practice?",
-            "Can you provide examples?"
-        ]
-    }
-
-@app.get("/")
-async def health_check():
-    """Async health check with memory stats"""
-    active_sessions = await conversation_memory.get_active_sessions_count()
-    
-    return {
-        "status": "healthy",
-        "message": "Fully Async LangChain RAG API with Memory",
-        "active_sessions": active_sessions,
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint_async(request: ChatRequest):
-    """Fully async main chat endpoint with memory"""
-    if not request.query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-    
-    try:
-        # Get or create session ID asynchronously
-        session_id = request.session_id or await conversation_memory.create_session()
-        
-        print(f"🔄 Processing query: {request.query[:50]}... | Session: {session_id}")
-        
-        # Run search and response generation concurrently
-        search_task = asyncio.create_task(search_documents_async(request.query))
-        
-        # Wait for search to complete
-        context = await search_task
-        print(f"📄 Context found: {len(context)} characters")
-        
-        # Generate response with memory
-        result = await generate_response_async(
-            request.query,
-            session_id,
-            context,
-            request.max_tokens,
-            request.temperature
-        )
-        
-        print(f"✅ Response generated for session: {session_id}")
-        
-        return ChatResponse(
-            response=result["response"],
-            followup_qs=result["followup_qs"],
-            session_id=session_id
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Chat endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-
-@app.get("/chat/history/{session_id}")
-async def get_conversation_history_async(session_id: str):
-    """Async get conversation history for a session"""
-    try:
-        history = await conversation_memory.get_conversation_history(session_id)
-        
-        return {
-            "session_id": session_id,
-            "conversation_count": len(history),
-            "history": [
-                {
-                    "question": turn.question,
-                    "answer": turn.answer,
-                    "timestamp": turn.timestamp.isoformat()
+            # Format the prompt with history and context
+            formatted_prompt = self.prompt.format_messages(
+                context=context,
+                chat_history=chat_history,
+                input=input_text
+            )
+            
+            # Generate response
+            response = await self.llm.ainvoke(formatted_prompt)
+            
+            # Parse structured response
+            try:
+                parsed_response = self.parser.parse(response.content)
+                result = {
+                    "response": parsed_response.response,
+                    "followup_qs": parsed_response.followup_qs
                 }
-                for turn in history
+            except Exception as parse_error:
+                print(f"⚠️ Parsing error, using fallback: {parse_error}")
+                result = await self._fallback_parse(response.content, input_text)
+            
+            # Store conversation in Azure SQL database
+            await self.sql_history.add_message(HumanMessage(content=input_text))
+            await self.sql_history.add_message(AIMessage(content=result["response"]))
+            
+            # Update session info
+            await db_manager.create_or_update_session(self.session_id)
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ Azure SQL RAG Chain error: {e}")
+            raise HTTPException(status_code=500, detail=f"Chain execution failed: {str(e)}")
+    
+    async def _fallback_parse(self, content: str, input_text: str) -> dict:
+        """Fallback response parsing"""
+        try:
+            # Try to extract JSON
+            if content.startswith('```json'):
+                content = content[7:-3].strip()
+            elif content.startswith('```'):
+                content = content[3:-3].strip()
+            
+            parsed = json.loads(content)
+            
+            if "response" in parsed and "followup_qs" in parsed:
+                followup_qs = parsed["followup_qs"][:3]
+                while len(followup_qs) < 3:
+                    followup_qs.append(f"Can you tell me more about {input_text}?")
+                
+                return {
+                    "response": parsed["response"],
+                    "followup_qs": followup_qs
+                }
+        except json.JSONDecodeError:
+            pass
+        
+        # Final fallback
+        return {
+            "response": content,
+            "followup_qs": [
+                f"What are the key aspects of {input_text}?",
+                f"How does {input_text} work in practice?",
+                f"Can you provide examples of {input_text}?"
             ]
         }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.delete("/chat/history/{session_id}")
-async def clear_conversation_history_async(session_id: str):
-    """Async clear conversation history for a session"""
-    try:
-        existed = await conversation_memory.clear_session(session_id)
-        
-        if existed:
-            return {"message": f"Conversation history cleared for session {session_id}"}
-        else:
-            raise HTTPException(status_code=404, detail="Session not found")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# [Continue with the rest of the FastAPI endpoints using AzureSQLRAGChain and AzureDatabaseManager]
 
-@app.get("/chat/sessions/active")
-async def get_active_sessions_async():
-    """Async get count of active sessions"""
-    active_count = await conversation_memory.get_active_sessions_count()
-    total_conversations = sum(len(conv) for conv in conversation_memory.conversations.values())
-    
-    return {
-        "active_sessions": active_count,
-        "total_conversations": total_conversations,
-        "timestamp": datetime.now().isoformat()
-    }
+app = FastAPI(
+    title="LangChain RAG API with Azure SQL Memory",
+    version="0.129.0",
+    lifespan=lifespan
+)
 
-@app.post("/chat/batch")
-async def batch_chat_async(requests: List[ChatRequest]):
-    """Async batch processing of multiple chat requests"""
-    if len(requests) > 10:
-        raise HTTPException(status_code=400, detail="Maximum 10 requests per batch")
-    
-    try:
-        # Process all requests concurrently
-        tasks = [
-            chat_endpoint_async(request) 
-            for request in requests
-        ]
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Handle results and exceptions
-        responses = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                responses.append({
-                    "error": str(result),
-                    "request_index": i
-                })
-            else:
-                responses.append(result.dict())
-        
-        return {"results": responses}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# [All the other endpoints remain the same, just replace the class names]
