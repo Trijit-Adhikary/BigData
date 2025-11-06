@@ -836,4 +836,4 @@ model = OpenAIModel(
         "temperature": 0.7,
     }
 )
-
+https://github.com/strands-agents/sdk-python/discussions/1143
