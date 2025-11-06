@@ -818,22 +818,22 @@ print(agent(message))
 
 
 
-from strands import Agent, ModelProvider
-from openai import AzureOpenAI
+# Replace with your Azure OpenAI endpoint and API key
+AZURE_OPENAI_ENDPOINT = "https://your-resource.openai.azure.com"
+AZURE_OPENAI_API_KEY = "your-api-key"
+AZURE_OPENAI_DEPLOYMENT_NAME = "your-deployment-name"  # e.g., "gpt-4o-mini"
 
-class AzureOpenAIModelProvider(ModelProvider):
-    def __init__(self, endpoint: str, api_key: str, deployment_name: str):
-        self.client = AzureOpenAI(
-            azure_endpoint=endpoint,
-            api_key=api_key,
-            api_version="2024-02-01"
-        )
-        self.deployment_name = deployment_name
-
-    def generate(self, prompt: str, **kwargs) -> str:
-        response = self.client.chat.completions.create(
-            model=self.deployment_name,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return response.choices.message.content
+# Initialize the model with Azure OpenAI settings
+model = OpenAIModel(
+    client_args={
+        "api_key": AZURE_OPENAI_API_KEY,
+        "base_url": f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}",
+        "api_version": "2024-02-01",  # Use the latest Azure OpenAI API version
+    },
+    model_id=AZURE_OPENAI_DEPLOYMENT_NAME,
+    params={
+        "max_tokens": 1000,
+        "temperature": 0.7,
+    }
+)
 
