@@ -475,3 +475,60 @@ app = FastAPI(
 )
 
 # [All the other endpoints remain the same, just replace the class names]
+
+
+
+# =============================================================================================================
+
+from openai import OpenAI
+from pptx import Presentation
+
+# Initialize OpenAI client with your API key
+client = OpenAI(api_key="YOUR_API_KEY_HERE")
+
+# Function to generate slide text using GPT
+def generate_slide_content(topic, num_slides=5):
+    prompt = f"""
+    Create a {num_slides}-slide outline for a professional PowerPoint presentation about '{topic}'.
+    For each slide, provide:
+    - A title
+    - 3–5 concise bullet points
+    """
+    
+    response = client.chat.completions.create(
+        model="gpt-5",  # You can use gpt-4-turbo if gpt-5 isn't available
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    return response.choices[0].message.content
+
+# Function to create PowerPoint from text
+def create_ppt(slide_text, output_file="Generated_Presentation.pptx"):
+    prs = Presentation()
+    slides = slide_text.split("\n\n")
+    
+    for section in slides:
+        lines = [line.strip() for line in section.split("\n") if line.strip()]
+        if not lines:
+            continue
+        title = lines[0].replace("Slide", "").strip(": ")
+        content = "\n".join(lines[1:])
+        
+        slide_layout = prs.slide_layouts[1]
+        slide = prs.slides.add_slide(slide_layout)
+        slide.shapes.title.text = title
+        slide.placeholders[1].text = content
+
+    prs.save(output_file)
+    print(f"✅ PowerPoint saved as {output_file}")
+
+# Main driver
+if _name_ == "_main_":
+    topic = input("Enter topic for your presentation: ")
+    num_slides = int(input("Number of slides: "))
+    
+    print("\n🤖 Generating content with GPT...\n")
+    slide_text = generate_slide_content(topic, num_slides)
+    
+    print("🪄 Creating PowerPoint...\n")
+    create_ppt(slide_text, f"{topic.replace(' ', '_')}.pptx")
