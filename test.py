@@ -747,3 +747,93 @@ if __name__ == "__main__":
         reload=True,
         log_level="info"
     )
+
+
+
+
+
+
+
+
+
+
+
+# Strands POC
+from strands import Agent, tool
+from strands_tools import calculator, current_time
+from strands.models.openai import OpenAIModel
+from dotenv import load_dotenv
+import requests
+import os
+
+
+load_dotenv()
+
+# Define a custom tool as a Python function using the @tool decorator
+@tool
+def get_weather(city: str) -> str:
+    """
+    Provide basic weather information of a given city.
+
+    Args:
+        city (str): The exact city to retrive the weather information
+
+    Returns:
+        str: Basic weather information for the city
+    """
+    print(f"🛠: Tool call, get_weather {city}")
+
+    url = f"https://wttr.in/{city}?format=%C+%t"
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        return f"The weather in {city} is {response.text}."
+    return "Something went wrong"
+
+
+model = OpenAIModel(
+    client_args={"api_key": os.getenv("OPENAI_API_KEY")},
+    model_id="gpt-4o-mini",  # Use your preferred OpenAI model name
+    params={"temperature": 0.3},
+)
+
+WEATHER_SYSTEM_PROMPT = """
+You are a helpful weather assistant.
+When asked about the weather in a city, use the get_weather tool to fetch current weather data.
+Always provide a clear and friendly summary.
+"""
+
+
+agent = Agent(system_prompt=WEATHER_SYSTEM_PROMPT, tools=[calculator, current_time, get_weather], model=model)
+
+# Ask the agent a question that uses the available tools
+message = """
+I have 4 requests:
+
+1. What is the time right now?
+2. Calculate 3111696 / 74088
+3. What is the weather in London?
+"""
+print(agent(message))
+
+
+
+from strands import Agent, ModelProvider
+from openai import AzureOpenAI
+
+class AzureOpenAIModelProvider(ModelProvider):
+    def __init__(self, endpoint: str, api_key: str, deployment_name: str):
+        self.client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version="2024-02-01"
+        )
+        self.deployment_name = deployment_name
+
+    def generate(self, prompt: str, **kwargs) -> str:
+        response = self.client.chat.completions.create(
+            model=self.deployment_name,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices.message.content
+
