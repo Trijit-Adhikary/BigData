@@ -885,3 +885,7 @@ agent = Agent(model=azure_model, tools=[calculator])
 response = agent("What is 2+2?")
 print(response)
 
+
+
+https://learn.microsoft.com/en-us/answers/questions/5513522/supported-languages-for-azure-openai-gpt-4o
+https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?pivots=azure-openai&tabs=global-standard-aoai%2Cstandard-chat-completions%2Cglobal-standard#gpt-4
