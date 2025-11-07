@@ -837,3 +837,51 @@ model = OpenAIModel(
     }
 )
 https://github.com/strands-agents/sdk-python/discussions/1143
+
+
+
+
+
+from strands.models.base import BaseModel
+from openai import AzureOpenAI
+import os
+
+class AzureOpenAIModel(BaseModel):
+    def __init__(self, api_key, azure_endpoint, api_version, deployment_id, **model_config):
+        self.client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=azure_endpoint,
+            api_version=api_version
+        )
+        self.deployment_id = deployment_id
+        self.model_config = model_config
+
+    def generate(self, prompt, **kwargs):
+        params = {**self.model_config, **kwargs}
+        response = self.client.chat.completions.create(
+            model=self.deployment_id,
+            messages=[{"role": "user", "content": prompt}],
+            **params
+        )
+        return response.choices.message.content
+
+    async def agenerate(self, prompt, **kwargs):
+        return self.generate(prompt, **kwargs)
+
+from strands import Agent
+from strands_tools import calculator
+
+azure_model = AzureOpenAIModel(
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_version="2023-05-15",
+    deployment_id="your-deployment-id",
+    max_tokens=1000,
+    temperature=0.7
+)
+
+agent = Agent(model=azure_model, tools=[calculator])
+
+response = agent("What is 2+2?")
+print(response)
+
