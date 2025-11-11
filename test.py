@@ -889,3 +889,49 @@ print(response)
 
 https://learn.microsoft.com/en-us/answers/questions/5513522/supported-languages-for-azure-openai-gpt-4o
 https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?pivots=azure-openai&tabs=global-standard-aoai%2Cstandard-chat-completions%2Cglobal-standard#gpt-4
+
+
+
+
+
+
+
+
+@app.get("/")
+async def root():
+    """Health check endpoint"""
+    return {
+        "message": "Pure LangChain Azure OpenAI RAG Chatbot API is running!",
+        "status": "healthy",
+        "using": "LangChain exclusively for Azure OpenAI"
+    }
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest):
+    """
+    LangChain-only chat endpoint
+    
+    - **query**: User's question or message
+    - **max_tokens**: Maximum tokens in response (default: 1000)  
+    - **temperature**: Response creativity (0.0-1.0, default: 0.1)
+    """
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    
+    try:
+        result = await generate_langchain_only_response(
+            request.query, 
+            request.max_tokens, 
+            request.temperature
+        )
+        
+        return ChatResponse(
+            response=result["response"],
+            followup_qs=result["followup_qs"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
