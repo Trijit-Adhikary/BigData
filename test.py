@@ -935,3 +935,6 @@ async def chat_endpoint(request: ChatRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+End Point: https://knowextpydev.aseqa.worldbank.org/
