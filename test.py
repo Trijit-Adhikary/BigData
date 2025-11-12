@@ -681,3 +681,18 @@ def process_data_with_partitions(lessdata, topic_reference, resource_type, outco
     
     return result_df
 
+
+
+def create_output_schema(input_columns):
+    """Create output schema for the processed DataFrame"""
+    schema_fields = [StructField(col, StringType(), True) for col in input_columns]
+    schema_fields += [
+        StructField("relevant_topic_llm", StringType(), True),
+        StructField("relevant_resource_type_llm", StringType(), True),
+        StructField("relevant_outcome_area_llm", StringType(), True),
+        StructField("relevant_enterprise_topic_llm", StringType(), True),
+        StructField("relevant_keywords_llm", StringType(), True)
+    ]
+    return StructType(schema_fields)
+
+
