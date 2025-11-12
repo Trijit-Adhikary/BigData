@@ -632,3 +632,52 @@ def process_partition_with_progress(iterator):
 ```
 
 This optimized version should significantly improve performance and cluster stability while maintaining the same business logic.
+
+
+
+# =======================================================================================================================================================================================
+
+def process_data_with_partitions(lessdata, topic_reference, resource_type, outcome_area, enterprise_topic, num_partitions=10):
+    """
+    Most efficient: Use Spark's natural partitioning
+    """
+    
+    # Repartition data for balanced processing
+    partitioned_data = lessdata.repartition(num_partitions)
+    
+    def process_partition(iterator):
+        client = create_azure_client()
+        results = []
+        partition_id = TaskContext.get().partitionId() if TaskContext else 0
+        
+        logger.info(f"Starting partition {partition_id}")
+        
+        for row in iterator:
+            row_data = row.asDict()
+            try:
+                processed_row = process_single_row(row_data, topic_reference, resource_type, outcome_area, enterprise_topic)
+                results.append(processed_row)
+            except Exception as e:
+                logger.error(f"Error in partition {partition_id}: {e}")
+                # Add row with empty LLM fields on error
+                row_data.update({
+                    "relevant_topic_llm": "",
+                    "relevant_resource_type_llm": "",
+                    "relevant_outcome_area_llm": "",
+                    "relevant_enterprise_topic_llm": "",
+                    "relevant_keywords_llm": ""
+                })
+                results.append(row_data)
+        
+        logger.info(f"Completed partition {partition_id}")
+        return results
+    
+    # Process all partitions in parallel
+    processed_rdd = partitioned_data.rdd.mapPartitions(process_partition)
+    
+    # Create final DataFrame
+    schema = create_output_schema(lessdata.columns)
+    result_df = spark.createDataFrame(processed_rdd, schema=schema)
+    
+    return result_df
+
