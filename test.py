@@ -696,3 +696,187 @@ def create_output_schema(input_columns):
     return StructType(schema_fields)
 
 
+
+
+
+
+from pyspark.sql.functions import pandas_udf, col, struct, monotonically_increasing_id, floor
+from pyspark.sql.types import StructType, StructField, StringType
+import pandas as pd
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Define output schema
+llm_output_schema = StructType([
+    StructField("relevant_topic_llm", StringType(), True),
+    StructField("relevant_resource_type_llm", StringType(), True),
+    StructField("relevant_outcome_area_llm", StringType(), True),
+    StructField("relevant_enterprise_topic_llm", StringType(), True),
+    StructField("relevant_keywords_llm", StringType(), True)
+])
+
+@pandas_udf(returnType=llm_output_schema)
+def process_batch_llm(
+    text_content: pd.Series,
+    abstract_text: pd.Series,
+    doc_name: pd.Series,
+    doc_type_name: pd.Series,
+    maj_theme_text: pd.Series,
+    ent_topic_text: pd.Series
+) -> pd.DataFrame:
+    """
+    Optimized pandas UDF for batch processing
+    Processes multiple rows efficiently with single client initialization
+    """
+    
+    # Initialize client once per batch (very important for performance)
+    client = create_azure_client()
+    
+    results = []
+    batch_size = len(text_content)
+    
+    print(f"Processing batch of {batch_size} rows...")
+    
+    for i in range(batch_size):
+        try:
+            # Prepare row data
+            row_data = {
+                'text_content': text_content.iloc[i] if pd.notna(text_content.iloc[i]) else None,
+                'ABSTACT_TEXT': abstract_text.iloc[i] if pd.notna(abstract_text.iloc[i]) else None,
+                'DOC_NAME': doc_name.iloc[i] if pd.notna(doc_name.iloc[i]) else '',
+                'DOC_TYPE_NAME': doc_type_name.iloc[i] if pd.notna(doc_type_name.iloc[i]) else '',
+                'MAJ_THEME_TEXT': maj_theme_text.iloc[i] if pd.notna(maj_theme_text.iloc[i]) else '',
+                'ENT_TOPIC_TEXT': ent_topic_text.iloc[i] if pd.notna(ent_topic_text.iloc[i]) else ''
+            }
+            
+            # Process single row with existing logic
+            processed = process_single_row(
+                row_data, topic_reference, resource_type, outcome_area, enterprise_topic
+            )
+            
+            # Extract LLM results
+            result_row = {
+                "relevant_topic_llm": processed.get("relevant_topic_llm", ""),
+                "relevant_resource_type_llm": processed.get("relevant_resource_type_llm", ""),
+                "relevant_outcome_area_llm": processed.get("relevant_outcome_area_llm", ""),
+                "relevant_enterprise_topic_llm": processed.get("relevant_enterprise_topic_llm", ""),
+                "relevant_keywords_llm": processed.get("relevant_keywords_llm", "")
+            }
+            
+            results.append(result_row)
+            
+            # Progress logging
+            if (i + 1) % 10 == 0:
+                print(f"Processed {i + 1}/{batch_size} rows in current batch")
+                
+        except Exception as e:
+            logger.error(f"Error processing row {i} in batch: {e}")
+            # Add empty results on error
+            results.append({
+                "relevant_topic_llm": "",
+                "relevant_resource_type_llm": "",
+                "relevant_outcome_area_llm": "",
+                "relevant_enterprise_topic_llm": "",
+                "relevant_keywords_llm": ""
+            })
+    
+    print(f"Completed batch of {batch_size} rows")
+    return pd.DataFrame(results)
+
+def process_3000_rows_optimized(lessdata, topic_reference, resource_type, outcome_area, enterprise_topic):
+    """
+    Optimized processing for 3000 rows using DataFrame APIs only
+    """
+    
+    print("=" * 50)
+    print("STARTING OPTIMIZED DATAFRAME PROCESSING")
+    print("=" * 50)
+    
+    # Step 1: Validate input
+    total_rows = lessdata.count()
+    print(f"📊 Total rows to process: {total_rows}")
+    print(f"📋 Columns: {len(lessdata.columns)}")
+    
+    # Step 2: Optimize partitioning for 3000 rows
+    # For 3000 rows, we want 15-20 partitions (150-200 rows each)
+    optimal_partitions = max(1, min(total_rows // 150, 20))
+    print(f"🔧 Repartitioning to {optimal_partitions} partitions")
+    
+    optimized_df = lessdata.repartition(optimal_partitions)
+    
+    # Step 3: Cache the repartitioned data
+    optimized_df.cache()
+    optimized_df.count()  # Force caching
+    print("💾 Data cached successfully")
+    
+    # Step 4: Apply processing UDF
+    print("🚀 Starting LLM processing...")
+    
+    import time
+    start_time = time.time()
+    
+    # Fill null values to avoid pandas issues
+    clean_df = optimized_df.fillna({
+        'text_content': '',
+        'ABSTACT_TEXT': '',
+        'DOC_NAME': '',
+        'DOC_TYPE_NAME': '',
+        'MAJ_THEME_TEXT': '',
+        'ENT_TOPIC_TEXT': ''
+    })
+    
+    # Apply the pandas UDF
+    result_df = clean_df.withColumn(
+        "llm_results",
+        process_batch_llm(
+            col("text_content"),
+            col("ABSTACT_TEXT"),
+            col("DOC_NAME"),
+            col("DOC_TYPE_NAME"),
+            col("MAJ_THEME_TEXT"),
+            col("ENT_TOPIC_TEXT")
+        )
+    )
+    
+    # Step 5: Flatten the results
+    final_df = result_df.select(
+        "*",
+        col("llm_results.relevant_topic_llm").alias("relevant_topic_llm"),
+        col("llm_results.relevant_resource_type_llm").alias("relevant_resource_type_llm"),
+        col("llm_results.relevant_outcome_area_llm").alias("relevant_outcome_area_llm"),
+        col("llm_results.relevant_enterprise_topic_llm").alias("relevant_enterprise_topic_llm"),
+        col("llm_results.relevant_keywords_llm").alias("relevant_keywords_llm")
+    ).drop("llm_results")
+    
+    # Step 6: Cache and validate results
+    final_df.cache()
+    final_count = final_df.count()
+    
+    # Step 7: Check processing success
+    successful_rows = final_df.filter(
+        (col("relevant_topic_llm").isNotNull()) & 
+        (col("relevant_topic_llm") != "")
+    ).count()
+    
+    end_time = time.time()
+    processing_time = (end_time - start_time) / 60
+    
+    # Results summary
+    print("\n" + "=" * 50)
+    print("PROCESSING COMPLETED!")
+    print("=" * 50)
+    print(f"✅ Total rows processed: {final_count}")
+    print(f"✅ Successful processing: {successful_rows}")
+    print(f"❌ Failed/Empty results: {final_count - successful_rows}")
+    print(f"⏱️  Total processing time: {processing_time:.2f} minutes")
+    print(f"⚡ Average time per row: {(processing_time * 60) / final_count:.2f} seconds")
+    
+    return final_df
+
+
+
+
+
