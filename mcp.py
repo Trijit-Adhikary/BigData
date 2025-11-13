@@ -93,3 +93,55 @@ async def chat_endpoint(
     except Exception as e:
         print(f"❌ Chat error: {e}")
         raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
+
+
+# ========================================================================================================================================================================
+
+pip install fastmcp httpx
+
+# mcp_server.py
+from fastmcp import FastMCP
+import httpx
+import asyncio
+
+# Replace with your endpoints
+FASTAPI_BASE = "https://<your-azure-app>.azurewebsites.net"
+
+mcp = FastMCP("AzureRAGProxy")
+
+@mcp.tool
+async def health_check_proxy() -> dict:
+    """Proxy the FastAPI / health check endpoint."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{FASTAPI_BASE}/")
+        resp.raise_for_status()
+        return resp.json()
+
+@mcp.tool
+async def chat_proxy(query: str, session_id: str = None, temperature: float = 0.7, max_tokens: int = 512) -> dict:
+    """
+    Proxy the FastAPI /chat endpoint.
+    Args:
+        query: The question for the RAG system.
+        session_id: Optional session id to maintain conversation.
+        temperature: LLM temperature.
+        max_tokens: Max tokens for LLM output.
+    """
+    payload = {
+        "query": query,
+        "session_id": session_id,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{FASTAPI_BASE}/chat", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+if __name__ == "__main__":
+    mcp.run()
+
+
+
+
+
